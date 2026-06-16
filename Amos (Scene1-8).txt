@@ -1,0 +1,1807 @@
+#include <windows.h>
+#include <stdlib.h>
+#include <GL\gl.h>
+#include <GL\glu.h>
+#include <GL\glut.h>
+#include <math.h>
+
+#define SCREENWIDTH 800
+#define SCREENHEIGHT 600
+#define FPS 60
+#define PI 3.14159265358979323846
+
+ULONGLONG startTime;
+float elapsedTime = 0.0f;
+
+// --- PAUSE VARIABLES ---
+bool isPaused = false;
+ULONGLONG lastFrameTime = 0;
+
+// --- 3D TACTICAL COLOR PALETTE ---
+GLfloat skyColor[] = { 15.0f / 255.0f, 20.0f / 255.0f, 40.0f / 255.0f, 1.0f };
+GLfloat bldgColor[] = { 0.45f, 0.45f, 0.48f, 1.0f };
+GLfloat roofColor[] = { 0.5f,  0.5f,  0.53f, 1.0f };
+GLfloat sideRoofCap[] = { 0.55f, 0.55f, 0.58f, 1.0f };
+GLfloat suitColor[] = { 0.08f, 0.08f, 0.08f, 1.0f };
+GLfloat gearColor[] = { 0.02f, 0.02f, 0.02f, 1.0f };
+GLfloat wingFabric[] = { 0.1f,  0.15f, 0.25f, 1.0f };
+GLfloat neonBlue[] = { 0.0f,  0.8f,  1.0f,  1.0f };
+GLfloat visorBase[] = { 0.0f,  0.2f,  0.6f,  1.0f };
+GLfloat skinTone[] = { 255.0f / 255.0f, 218.0f / 255.0f, 185.0f / 255.0f, 1.0f };
+GLfloat fireYellow[] = { 1.0f,  0.9f,  0.2f,  1.0f };
+GLfloat fireOrange[] = { 1.0f,  0.5f,  0.0f,  1.0f };
+GLfloat fireRed[] = { 0.8f,  0.1f,  0.0f,  1.0f };
+GLfloat windowGlow[] = { 0.9f, 0.8f, 0.2f, 1.0f };
+GLfloat streetColor[] = { 0.15f, 0.15f, 0.18f, 1.0f };
+GLfloat walkwayColor[] = { 0.55f, 0.30f, 0.20f, 1.0f }; // Light red-brown
+GLfloat roadLineGlow[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+GLfloat shirtBlue[] = { 0.2f, 0.4f, 0.7f, 1.0f };
+GLfloat shirtGreen[] = { 0.3f, 0.6f, 0.3f, 1.0f };
+GLfloat shirtGrey[] = { 0.6f, 0.6f, 0.6f, 1.0f };
+GLfloat pantsDark[] = { 0.15f, 0.15f, 0.15f, 1.0f };
+GLfloat noGlow[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+GLfloat industrialMetal[] = { 0.2f,  0.2f,  0.22f, 1.0f };
+GLfloat doorMetal[] = { 0.25f, 0.25f, 0.28f, 1.0f };
+
+// --- TACTICAL PARACHUTE MODEL ---
+void drawParachute(float deployScale) {
+    if (deployScale <= 0.0f) return;
+
+    glPushMatrix();
+    float canopyY = 1.5f + (deployScale * 3.5f);
+
+    // Canopy (Tactical Dark Grey Oval)
+    glPushMatrix();
+    glTranslatef(0.0f, canopyY, 0.0f);
+    GLfloat chuteColor[] = { 0.15f, 0.15f, 0.18f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, chuteColor);
+    glScalef(deployScale * 3.0f, deployScale * 0.8f, deployScale * 1.5f);
+    glutSolidSphere(1.0, 16, 16);
+    glPopMatrix();
+
+    // Ropes (Drawn from operative's body up to the canopy)
+    glDisable(GL_LIGHTING);
+    glColor3f(0.8f, 0.8f, 0.8f);
+    glLineWidth(2.0f);
+    glBegin(GL_LINES);
+
+    // Left hand to Left edge
+    glVertex3f(-0.5f, 1.2f, 0.2f);
+    glVertex3f(-deployScale * 2.8f, canopyY, 0.0f);
+
+    // Right hand to Right edge
+    glVertex3f(0.5f, 1.2f, 0.2f);
+    glVertex3f(deployScale * 2.8f, canopyY, 0.0f);
+
+    // Front canopy rope
+    glVertex3f(0.0f, 0.6f, -0.25f);
+    glVertex3f(0.0f, canopyY, deployScale * 1.4f);
+
+    // Harness (back) to Back edge
+    glVertex3f(0.0f, 0.5f, -0.3f);
+    glVertex3f(0.0f, canopyY, -deployScale * 1.4f);
+
+    glEnd();
+    glLineWidth(1.0f);
+    glEnable(GL_LIGHTING);
+
+    glPopMatrix();
+}
+
+// --- 3D ANIMATED CHARACTER MODEL ---
+void drawOperative(float pitchAngle, float yawAngle, float rollAngle, float runSwing, float wingAmount, bool holdingChute = false, bool superheroLanding = false) {
+    glPushMatrix();
+    glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+    glRotatef(yawAngle, 0.0f, 1.0f, 0.0f);
+    glRotatef(pitchAngle, 1.0f, 0.0f, 0.0f);
+    glRotatef(rollAngle, 0.0f, 1.0f, 0.0f);
+
+    GLfloat suitHighlight[] = { 0.4f, 0.4f, 0.4f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_SPECULAR, suitHighlight);
+    glMaterialf(GL_FRONT, GL_SHININESS, 30.0f);
+
+    // 1. MAIN OVERCOAT (Back and Sides)
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+    glScalef(0.85f, 1.25f, 0.4f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // 2. WHITE SHIRT (Chest Plate)
+    glPushMatrix();
+    GLfloat shirtColor[] = { 0.85f, 0.85f, 0.85f, 1.0f }; 
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, shirtColor);
+    glTranslatef(0.0f, 0.1f, 0.21f);
+    glScalef(0.4f, 1.0f, 0.02f);    
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // 3. RED TIE (Center Strip)
+    glPushMatrix();
+    GLfloat tieColor[] = { 0.7f, 0.05f, 0.05f, 1.0f }; 
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, tieColor);
+    glTranslatef(0.0f, 0.1f, 0.23f); 
+    glScalef(0.08f, 0.8f, 0.02f);    
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // 4. OPEN OVERCOAT LAPELS (Angles outward like an open coat)
+    // Left Lapel
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+    glTranslatef(-0.2f, 0.0f, 0.22f);
+    glRotatef(12.0f, 0.0f, 1.0f, 0.0f);
+    glScalef(0.25f, 1.2f, 0.05f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Right Lapel
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+    glTranslatef(0.2f, 0.0f, 0.22f);
+    glRotatef(-12.0f, 0.0f, 1.0f, 0.0f);
+    glScalef(0.25f, 1.2f, 0.05f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // HEAD & VISOR
+    glPushMatrix();
+    glTranslatef(0.0f, 0.85f, 0.0f);
+    glRotatef(-pitchAngle, 1.0f, 0.0f, 0.0f);
+    glRotatef(-yawAngle * 0.0f, 0.0f, 1.0f, 0.0f);
+    glRotatef(pitchAngle, 1.0f, 0.0f, 0.0f);
+    if (wingAmount > 0.0f) glRotatef(-20.0f * wingAmount, 1.0f, 0.0f, 0.0f);
+
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, skinTone);
+    GLfloat skinHighlight[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_SPECULAR, skinHighlight);
+    glMaterialf(GL_FRONT, GL_SHININESS, 15.0f);
+    glutSolidSphere(0.3, 20, 20);
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, visorBase);
+    glMaterialfv(GL_FRONT, GL_EMISSION, neonBlue);
+    GLfloat glassHighlight[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_SPECULAR, glassHighlight);
+    glMaterialf(GL_FRONT, GL_SHININESS, 100.0f);
+    glTranslatef(0.0f, 0.15f, 0.28f);
+    glScalef(0.45f, 0.15f, 0.2f);
+    glutSolidCube(1.0);
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+    glPopMatrix();
+    glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, suitHighlight);
+    glMaterialf(GL_FRONT, GL_SHININESS, 30.0f);
+
+    // RIGHT ARM (Braced slightly down and out)
+    glPushMatrix();
+    glTranslatef(0.5f, 0.5f, 0.0f);
+    if (superheroLanding) {
+        glRotatef(-15.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(10.0f, 0.0f, 0.0f, 1.0f);
+    }
+    else if (holdingChute) {
+        glRotatef(-160.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(10.0f, 0.0f, 0.0f, 1.0f);
+    }
+    else {
+        glRotatef(runSwing, 1.0f, 0.0f, 0.0f);
+        glRotatef(-15.0f * wingAmount, 1.0f, 0.0f, 0.0f);
+    }
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+    glPushMatrix(); glTranslatef(0.0f, -0.4f, 0.0f); glScalef(0.2f, 0.8f, 0.2f); glutSolidCube(1.0); glPopMatrix();
+    glPopMatrix();
+
+    // LEFT ARM (Braced slightly down and out)
+    glPushMatrix();
+    glTranslatef(-0.5f, 0.5f, 0.0f);
+    if (superheroLanding) {
+        glRotatef(-15.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(-10.0f, 0.0f, 0.0f, 1.0f);
+    }
+    else if (holdingChute) {
+        glRotatef(-160.0f, 1.0f, 0.0f, 0.0f);
+        glRotatef(-10.0f, 0.0f, 0.0f, 1.0f);
+    }
+    else {
+        glRotatef(-runSwing, 1.0f, 0.0f, 0.0f);
+        glRotatef(-15.0f * wingAmount, 1.0f, 0.0f, 0.0f);
+    }
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+    glPushMatrix(); glTranslatef(0.0f, -0.4f, 0.0f); glScalef(0.2f, 0.8f, 0.2f); glutSolidCube(1.0); glPopMatrix();
+    glPopMatrix();
+
+    // RIGHT LEG (Standing straight)
+    glPushMatrix();
+    glTranslatef(0.25f, -0.6f, 0.0f);
+    if (superheroLanding) glRotatef(0.0f, 1.0f, 0.0f, 0.0f); 
+    else glRotatef(-runSwing, 1.0f, 0.0f, 0.0f);
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+    glTranslatef(0.0f, -0.5f, 0.0f);
+    glScalef(0.25f, 1.0f, 0.25f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // LEFT LEG (Standing straight)
+    glPushMatrix();
+    glTranslatef(-0.25f, -0.6f, 0.0f);
+    if (superheroLanding) glRotatef(0.0f, 1.0f, 0.0f, 0.0f); 
+    else glRotatef(runSwing, 1.0f, 0.0f, 0.0f);
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+    glTranslatef(0.0f, -0.5f, 0.0f);
+    glScalef(0.25f, 1.0f, 0.25f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // BACK WINGSUIT PANELS
+    if (wingAmount > 0.0f) {
+        // 1. Main Fabric
+        glPushMatrix();
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, wingFabric);
+        glTranslatef(0.0f, 0.2f, -0.25f);
+        glScalef(5.0f * wingAmount, 0.8f, 0.05f);
+        glutSolidCube(1.0);
+        glPopMatrix();
+
+        // 2. Neon Blue Trim Strip
+        glPushMatrix();
+        glMaterialfv(GL_FRONT, GL_EMISSION, neonBlue);
+        glTranslatef(0.0f, 0.2f, -0.28f);
+        glScalef(5.0f * wingAmount, 0.08f, 0.05f);
+        glutSolidCube(1.0);
+        glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+        glPopMatrix();
+
+        // --- JETPACK ENGINES ---
+        // Left Engine Block
+        glPushMatrix();
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+        glTranslatef(-1.2f * wingAmount, 0.2f, -0.35f); 
+        glScalef(0.3f, 0.5f, 0.2f);
+        glutSolidCube(1.0);
+        glPopMatrix();
+
+        // Right Engine Block
+        glPushMatrix();
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+        glTranslatef(1.2f * wingAmount, 0.2f, -0.35f);  
+        glScalef(0.3f, 0.5f, 0.2f);
+        glutSolidCube(1.0);
+        glPopMatrix();
+
+        // LOOPING SMOKE EFFECT
+        glDisable(GL_LIGHTING); 
+
+        // Draw 3 smoke particles per engine that infinitely loop
+        for (int i = 0; i < 3; i++) {
+            float life = fmodf((elapsedTime * 0.003f) + (i * 0.33f), 1.0f);
+
+            float smokeSize = 0.25f * (1.0f - life); // Smoke shrinks as it gets older
+            float smokeY = 0.0f - (life * 2.0f);     // Smoke moves downwards towards the legs
+
+            // Wobble effect
+            float wobble = sinf(elapsedTime * 0.01f + i) * 0.1f * life;
+
+            // Make the smoke a dark grey
+            glColor3f(0.4f, 0.4f, 0.4f);
+
+            // Left Engine Smoke Particle
+            glPushMatrix();
+            glTranslatef((-1.2f * wingAmount) + wobble, smokeY, -0.35f);
+            glScalef(smokeSize, smokeSize, smokeSize);
+            glutSolidSphere(1.0, 8, 8);
+            glPopMatrix();
+
+            // Right Engine Smoke Particle
+            glPushMatrix();
+            glTranslatef((1.2f * wingAmount) + wobble, smokeY, -0.35f);
+            glScalef(smokeSize, smokeSize, smokeSize);
+            glutSolidSphere(1.0, 8, 8);
+            glPopMatrix();
+        }
+
+        glEnable(GL_LIGHTING); // Turn lighting back on for the rest of the scene
+    }
+
+    GLfloat noSpecular[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_SPECULAR, noSpecular);
+    glPopMatrix();
+}
+
+void drawFlatCircle(float radius, int segments) {
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < segments; i++) {
+        float theta = 2.0f * PI * float(i) / float(segments);
+        glVertex3f(radius * cosf(theta), 0.0f, radius * sinf(theta));
+    }
+    glEnd();
+}
+
+// --- HELPER TO DRAW GLOWING TEXT ---
+void drawNeonText(const char* text) {
+    glPushMatrix();
+    glLineWidth(4.0f); // Bold glowing lines
+    for (const char* c = text; *c != '\0'; c++) {
+        glutStrokeCharacter(GLUT_STROKE_ROMAN, *c);
+    }
+    glLineWidth(1.0f);
+    glPopMatrix();
+}
+
+void drawExplosion(float time) {
+    glPushMatrix();
+    glTranslatef(0.0f, 95.0f, 45.0f);
+
+    glScalef(0.65f, 0.65f, 0.65f);
+
+    float grow = time * 0.04f;
+    if (grow > 45.0f) grow = 45.0f;
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_LIGHTING);
+
+    // 1. Red Outer Layer 
+    glColor4f(fireRed[0], fireRed[1], fireRed[2], 0.4f);
+    for (float ex = -30.0f; ex <= 30.0f; ex += 15.0f) {
+        for (float ez = -15.0f; ez <= 20.0f; ez += 15.0f) {
+            glPushMatrix();
+            glTranslatef(ex, 5.0f, ez);
+            glScalef(grow * 1.2f, grow * 1.5f, grow * 1.2f);
+            glutSolidSphere(1.0, 10, 10);
+            glPopMatrix();
+        }
+    }
+
+    // 2. Orange Middle Layer
+    glColor4f(fireOrange[0], fireOrange[1], fireOrange[2], 0.6f);
+    for (float ex = -20.0f; ex <= 20.0f; ex += 20.0f) {
+        for (float ez = -10.0f; ez <= 10.0f; ez += 10.0f) {
+            glPushMatrix();
+            glTranslatef(ex, 10.0f, ez);
+            glScalef(grow * 1.0f, grow * 1.3f, grow * 1.0f);
+            glutSolidSphere(1.0, 10, 10);
+            glPopMatrix();
+        }
+    }
+
+    // 3. Yellow Core 
+    glColor4f(fireYellow[0], fireYellow[1], fireYellow[2], 0.8f);
+    for (float ex = -10.0f; ex <= 10.0f; ex += 10.0f) {
+        glPushMatrix();
+        glTranslatef(ex, 15.0f, 0.0f);
+        glScalef(grow * 0.8f, grow * 1.1f, grow * 0.8f);
+        glutSolidSphere(1.0, 10, 10);
+        glPopMatrix();
+    }
+
+    // --- PARTICLE PHYSICS SYSTEM ---
+    float pTime = time * 0.02f;
+
+    // Concrete Debris (Dark Grey Cubes)
+    glColor4f(0.2f, 0.2f, 0.22f, 1.0f);
+    for (int i = 0; i < 45; i++) {
+        float angleH = i * 137.5f;
+        float angleV = (i % 10) * 15.0f;
+
+        float vx = sinf(angleH) * cosf(angleV) * 2.5f;
+        float vy = sinf(angleV) * 2.0f + 2.0f;
+        float vz = cosf(angleH) * cosf(angleV) * 2.5f;
+
+        float px = vx * pTime;
+        float py = vy * pTime - (0.015f * pTime * pTime);
+        float pz = vz * pTime;
+
+        if (py > -50.0f) {
+            glPushMatrix();
+            glTranslatef(px, py + 5.0f, pz);
+            glRotatef(time * 0.5f + i * 20.0f, 1.0f, 1.0f, 1.0f);
+            glScalef(1.5f, 1.5f, 1.5f);
+            glutSolidCube(1.0);
+            glPopMatrix();
+        }
+    }
+
+    // Glowing Fire Sparks (Orange Spheres)
+    glColor4f(fireOrange[0], fireOrange[1], fireOrange[2], 0.9f);
+    for (int i = 0; i < 30; i++) {
+        float angleH = i * 73.0f;
+        float vy = (i % 5) * 0.8f + 3.0f;
+
+        float px = sinf(angleH) * 2.0f * pTime;
+        float py = vy * pTime - (0.012f * pTime * pTime);
+        float pz = cosf(angleH) * 2.0f * pTime;
+
+        if (py > -30.0f) {
+            glPushMatrix();
+            glTranslatef(px, py + 10.0f, pz);
+            glScalef(2.5f, 2.5f, 2.5f);
+            glutSolidSphere(1.0, 5, 5);
+            glPopMatrix();
+        }
+    }
+
+    // --- DYNAMIC POINT LIGHTING ---
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT1);
+
+    float lightIntensity = 1.0f - (grow / 45.0f);
+    if (lightIntensity < 0.0f) lightIntensity = 0.0f;
+
+    GLfloat flashDiffuse[] = { 1.0f * lightIntensity, 0.5f * lightIntensity, 0.0f, 1.0f };
+    GLfloat flashPos[] = { 0.0f, 20.0f, 0.0f, 1.0f };
+
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, flashDiffuse);
+    glLightfv(GL_LIGHT1, GL_POSITION, flashPos);
+
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glPopMatrix();
+}
+
+void drawSideBuilding(float xPos, float zPos, float height) {
+    float groundY = -90.0f;
+    float topY = groundY + height;
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+    glPushMatrix();
+    float centerY = groundY + (height / 2.0f);
+    glTranslatef(xPos, centerY, zPos);
+    glScalef(20.0f, height, 30.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+    glTranslatef(xPos, topY + 0.5f, zPos);
+    glScalef(21.0f, 2.0f, 31.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_EMISSION, windowGlow);
+    float faceX = (xPos < 0) ? xPos + 10.1f : xPos - 10.1f;
+    for (float wy = topY - 15.0f; wy > -60.0f; wy -= 10.0f) {
+        for (float wz = zPos - 8.0f; wz <= zPos + 8.0f; wz += 8.0f) {
+            glPushMatrix();
+            glTranslatef(faceX, wy, wz);
+            glScalef(0.5f, 3.5f, 3.0f);
+            glutSolidCube(1.0);
+            glPopMatrix();
+        }
+    }
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+    glPopMatrix();
+}
+
+// --- SHOPLOT MODEL ---
+void drawShoplot(float xPos, float zPos, bool faceRight) {
+    float height = 45.0f; // Much shorter than standard buildings
+    float groundY = -90.0f;
+    float topY = groundY + height;
+
+    // Main Building Body
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+    glPushMatrix();
+    float centerY = groundY + (height / 2.0f);
+    glTranslatef(xPos, centerY, zPos);
+    glScalef(20.0f, height, 30.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Roof Cap
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+    glTranslatef(xPos, topY + 0.5f, zPos);
+    glScalef(21.0f, 2.0f, 31.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    float faceX = faceRight ? xPos + 10.1f : xPos - 10.1f;
+
+    // Big Glass Shopfront (Light Blue Glow)
+    GLfloat shopGlow[] = { 0.4f, 0.8f, 1.0f, 1.0f }; 
+    glMaterialfv(GL_FRONT, GL_EMISSION, shopGlow);
+    glPushMatrix();
+    glTranslatef(faceX, groundY + 15.0f, zPos);  
+    glScalef(0.5f, 20.0f, 24.0f);              
+    glutSolidCube(1.0);
+    glPopMatrix();
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+
+    // Top Signboard (Neon Accent Color)
+    GLfloat signColor[] = { 1.0f, 0.3f, 0.1f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, signColor);
+    glMaterialfv(GL_FRONT, GL_EMISSION, signColor);
+    glPushMatrix();
+    glTranslatef(faceX, topY + 8.0f, zPos);      
+    glScalef(1.0f, 10.0f, 26.0f);               
+    glutSolidCube(1.0);
+    glPopMatrix();
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+}
+
+// --- HORIZONTAL T-JUNCTION BUILDINGS (Windows face Z-Axis) ---
+void drawHorizontalBuilding(float xPos, float zPos, float height, bool faceSouth) {
+    float groundY = -90.0f;
+    float topY = groundY + height;
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+    glPushMatrix();
+    float centerY = groundY + (height / 2.0f);
+    glTranslatef(xPos, centerY, zPos);
+    glScalef(30.0f, height, 20.0f); 
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+    glTranslatef(xPos, topY + 0.5f, zPos);
+    glScalef(32.0f, 2.0f, 22.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_EMISSION, windowGlow);
+    float faceZ = faceSouth ? zPos + 10.1f : zPos - 10.1f;
+    for (float wy = topY - 15.0f; wy > -60.0f; wy -= 10.0f) {
+        for (float wx = xPos - 8.0f; wx <= xPos + 8.0f; wx += 8.0f) {
+            glPushMatrix();
+            glTranslatef(wx, wy, faceZ);
+            glScalef(3.0f, 3.5f, 0.5f);
+            glutSolidCube(1.0);
+            glPopMatrix();
+        }
+    }
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+    glPopMatrix();
+}
+
+void drawTrafficLight(float xPos, float zPos, float rotY, bool isGreen) {
+    glPushMatrix();
+    glTranslatef(xPos, -105.0f, zPos);
+    glRotatef(rotY, 0.0f, 1.0f, 0.0f);
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+    glTranslatef(0.0f, 22.0f, 0.0f);
+    glScalef(1.5f, 44.0f, 1.5f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+    glTranslatef(3.0f, 44.0f, 0.0f);
+    glScalef(6.0f, 1.5f, 1.5f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+    glTranslatef(6.0f, 39.0f, 0.0f);
+    glScalef(4.0f, 11.0f, 4.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    if (isGreen) {
+        // GREEN LIGHT ACTIVE
+        GLfloat greenGlow[] = { 0.0f, 1.0f, 0.0f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_EMISSION, greenGlow);
+        glPushMatrix(); glTranslatef(6.0f, 35.0f, 2.1f); glScalef(2.5f, 2.5f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+
+        GLfloat dimYellow[] = { 0.15f, 0.10f, 0.0f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_EMISSION, dimYellow);
+        glPushMatrix(); glTranslatef(6.0f, 39.0f, 2.1f); glScalef(2.5f, 2.5f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+
+        GLfloat dimRed[] = { 0.1f, 0.0f, 0.0f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_EMISSION, dimRed);
+        glPushMatrix(); glTranslatef(6.0f, 43.0f, 2.1f); glScalef(2.5f, 2.5f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+    }
+    else {
+        // RED LIGHT ACTIVE
+        GLfloat redGlow[] = { 1.0f, 0.0f, 0.0f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_EMISSION, redGlow);
+        glPushMatrix(); glTranslatef(6.0f, 43.0f, 2.1f); glScalef(2.5f, 2.5f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+
+        GLfloat dimYellow[] = { 0.15f, 0.10f, 0.0f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_EMISSION, dimYellow);
+        glPushMatrix(); glTranslatef(6.0f, 39.0f, 2.1f); glScalef(2.5f, 2.5f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+
+        GLfloat dimGreen[] = { 0.0f, 0.08f, 0.0f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_EMISSION, dimGreen);
+        glPushMatrix(); glTranslatef(6.0f, 35.0f, 2.1f); glScalef(2.5f, 2.5f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+    }
+
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+    glPopMatrix();
+}
+
+// --- LOW-POLY PEDESTRIAN MODEL ---
+void drawPedestrian(float xPos, float zPos, float rotY, GLfloat* shirtColor, float scale) {
+    glPushMatrix();
+
+    glTranslatef(xPos, -89.5f + (1.5f * scale), zPos);
+    glRotatef(rotY, 0.0f, 1.0f, 0.0f);
+    glScalef(scale, scale, scale); 
+
+    // Head
+    glPushMatrix();
+    glTranslatef(0.0f, 2.5f, 0.0f);
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, skinTone);
+    glutSolidSphere(0.4, 10, 10);
+    glPopMatrix();
+
+    // Torso (Shirt)
+    glPushMatrix();
+    glTranslatef(0.0f, 1.2f, 0.0f);
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, shirtColor);
+    glScalef(0.8f, 1.5f, 0.4f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Legs (Pants)
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, pantsDark);
+    glPushMatrix(); // Left Leg
+    glTranslatef(-0.2f, 0.0f, 0.0f);
+    glScalef(0.35f, 1.2f, 0.35f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix(); // Right Leg
+    glTranslatef(0.2f, 0.0f, 0.0f);
+    glScalef(0.35f, 1.2f, 0.35f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPopMatrix();
+}
+
+void drawCar(float xPos, float zPos, GLfloat* color, float rotY) {
+    if (zPos > 0.0f) return;
+
+    glPushMatrix();
+    glTranslatef(xPos, -88.0f, zPos);
+    glRotatef(rotY, 0.0f, 1.0f, 0.0f);
+    glScalef(2.0f, 2.0f, 2.0f);
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, color);
+    glScalef(3.0f, 1.2f, 6.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, color);
+    glTranslatef(0.0f, 1.1f, -0.5f);
+    glScalef(2.4f, 1.0f, 3.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    GLfloat headlightColor[] = { 1.0f, 1.0f, 0.8f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_EMISSION, headlightColor);
+    glPushMatrix(); glTranslatef(-1.0f, 0.2f, -3.05f); glScalef(0.6f, 0.4f, 0.1f); glutSolidCube(1.0); glPopMatrix();
+    glPushMatrix(); glTranslatef(1.0f, 0.2f, -3.05f); glScalef(0.6f, 0.4f, 0.1f); glutSolidCube(1.0); glPopMatrix();
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+
+    if (xPos != 57.5f && xPos != -57.5f) {
+        // --- HEADLIGHT BEAM CASTING ON THE ROAD ---
+        glDisable(GL_LIGHTING);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+
+        glBegin(GL_QUADS);
+
+        // LEFT BEAM
+        glColor4f(1.0f, 1.0f, 0.7f, 0.6f);
+        glVertex3f(-1.3f, -0.7f, -3.0f);
+        glVertex3f(-0.7f, -0.7f, -3.0f);
+
+        glColor4f(1.0f, 1.0f, 0.7f, 0.0f);
+        glVertex3f(-1.5f, -0.7f, -15.0f);
+        glVertex3f(-3.5f, -0.7f, -15.0f);
+
+        // RIGHT BEAM
+        glColor4f(1.0f, 1.0f, 0.7f, 0.6f);
+        glVertex3f(0.7f, -0.7f, -3.0f);
+        glVertex3f(1.3f, -0.7f, -3.0f);
+
+        glColor4f(1.0f, 1.0f, 0.7f, 0.0f);
+        glVertex3f(3.5f, -0.7f, -15.0f);
+        glVertex3f(1.5f, -0.7f, -15.0f);
+
+        glEnd();
+
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+        glEnable(GL_LIGHTING);
+    }
+
+    GLfloat taillightColor[] = { 1.0f, 0.1f, 0.1f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_EMISSION, taillightColor);
+    glPushMatrix(); glTranslatef(-1.0f, 0.2f, 3.05f); glScalef(0.8f, 0.3f, 0.1f); glutSolidCube(1.0); glPopMatrix();
+    glPushMatrix(); glTranslatef(1.0f, 0.2f, 3.05f); glScalef(0.8f, 0.3f, 0.1f); glutSolidCube(1.0); glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+    glPopMatrix();
+}
+
+void getPath_MainStop(float p, float stopZ, float& x, float& z, float& rotY) {
+    x = -35.0f;
+    rotY = 0.0f;
+    z = 50.0f - p;
+    if (z < stopZ) z = stopZ;
+}
+
+void getPath3_StraightDown(float p, float& x, float& z, float& rotY) {
+    x = 30.0f; z = -600.0f + p; rotY = 180.0f;
+}
+
+void getPath4_RightToMain(float p, float& x, float& z, float& rotY) {
+  
+    if (p < 0) {
+        x = 80.0f - p;
+        z = -640.0f;
+        rotY = 90.0f;
+    }
+
+    else if (p < 50.0f * PI / 2.0f) {
+        float t = p / 50.0f;
+        x = 80.0f - 50.0f * sinf(t);
+        z = -590.0f - 50.0f * cosf(t);
+        rotY = 90.0f + t * 180.0f / PI;
+    }
+
+    else {
+        x = 30.0f;
+        z = -590.0f + (p - 50.0f * PI / 2.0f);
+        rotY = 180.0f;
+    }
+}
+
+void drawSky() {
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glLoadIdentity();
+    glOrtho(-1, 1, -1, 1, -1, 1);
+
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+    glLoadIdentity();
+
+    glColor3f(skyColor[0], skyColor[1], skyColor[2]);
+    glBegin(GL_QUADS);
+    glVertex2f(-1.0f, -1.0f);
+    glVertex2f(1.0f, -1.0f);
+    glVertex2f(1.0f, 1.0f);
+    glVertex2f(-1.0f, 1.0f);
+    glEnd();
+
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+}
+
+// The Helipad Model
+void drawHelipad(float x, float y, float z) {
+    glPushMatrix();
+    glTranslatef(x, y, z);
+    glDisable(GL_LIGHTING);
+
+    glColor3fv(bldgColor);
+    drawFlatCircle(13.0f, 32);
+
+    glTranslatef(0.0f, 0.1f, 0.0f);
+    glColor3f(0.4f, 0.4f, 0.4f);
+    drawFlatCircle(10.0f, 32);
+
+    glTranslatef(0.0f, 0.1f, 0.0f);
+    glColor3f(0.9f, 0.9f, 0.9f);
+    glLineWidth(5.0f);
+    glBegin(GL_LINES);
+    glVertex3f(-4.0f, 0.0f, -5.0f); glVertex3f(-4.0f, 0.0f, 5.0f);
+    glVertex3f(4.0f, 0.0f, -5.0f);  glVertex3f(4.0f, 0.0f, 5.0f);
+    glVertex3f(-4.0f, 0.0f, 0.0f);  glVertex3f(4.0f, 0.0f, 0.0f);
+    glEnd();
+
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+}
+
+// The Building + The Helipad
+void drawLaunchBuilding(float xPos, float zPos) {
+    glPushMatrix();
+    // This shifts the ENTIRE building and helipad together
+    glTranslatef(xPos, 0.0f, zPos);
+
+    // Main Building Block
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+    glTranslatef(0.0f, 24.5f, 25.0f);
+    glScalef(60.0f, 51.0f, 50.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Roof Cap
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+    glTranslatef(0.0f, 50.5f, 25.0f);
+    glScalef(62.0f, 2.0f, 52.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Glowing Windows
+    glMaterialfv(GL_FRONT, GL_EMISSION, windowGlow);
+    float startY = 42.0f;
+    for (int row = 0; row < 6; row++) {
+        float wy = startY - (row * 12.0f);
+        glPushMatrix(); glTranslatef(-14.0f, wy, -0.1f); glScalef(12.0f, 7.0f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+        glPushMatrix(); glTranslatef(14.0f, wy, -0.1f); glScalef(12.0f, 7.0f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+    }
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+
+    // The Helipad
+    drawHelipad(15.0f, 51.6f, 13.0f);
+
+    glPopMatrix();
+}
+
+// --- LOW-POLY DECORATIVE TREE MODEL ---
+void drawTree(float xPos, float zPos) {
+    glPushMatrix();
+    // Place tree perfectly on top of the terracotta walkways
+    glTranslatef(xPos, -89.5f, zPos);
+
+    // 1. Tree Trunk (Dark Brown)
+    GLfloat trunkColor[] = { 0.25f, 0.15f, 0.10f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, trunkColor);
+    glPushMatrix();
+    glTranslatef(0.0f, 12.0f, 0.0f);
+    glScalef(3.0f, 24.0f, 3.0f); // Tall trunk
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // 2. Tree Canopy (Forest Green)
+    GLfloat leafColor[] = { 0.1f, 0.35f, 0.15f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, leafColor);
+
+    // Bottom, wider layer of leaves
+    glPushMatrix();
+    glTranslatef(0.0f, 28.0f, 0.0f);
+    glScalef(15.0f, 14.0f, 15.0f);
+    glutSolidSphere(1.0, 8, 8);
+    glPopMatrix();
+
+    // Top, smaller layer of leaves
+    glPushMatrix();
+    glTranslatef(0.0f, 40.0f, 0.0f);
+    glScalef(10.0f, 10.0f, 10.0f);
+    glutSolidSphere(1.0, 8, 8);
+    glPopMatrix();
+
+    glPopMatrix();
+}
+
+void drawCity() {
+    glPushMatrix();
+    // 1. Central Launch Rooftop
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+    glTranslatef(0.0f, 0.5f, 25.0f);
+    glScalef(60.0f, 181.0f, 50.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+    glTranslatef(0.0f, 91.5f, 25.0f);
+    glScalef(62.0f, 2.0f, 52.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_EMISSION, windowGlow);
+    float startY = 82.0f;
+    for (int row = 0; row < 10; row++) {
+        float wy = startY - (row * 12.0f);
+        glPushMatrix(); glTranslatef(-14.0f, wy, -0.1f); glScalef(12.0f, 7.0f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+        glPushMatrix(); glTranslatef(14.0f, wy, -0.1f); glScalef(12.0f, 7.0f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+    }
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+
+    // 2. MAIN STREET CITY CANYON
+    for (float buildZ = 40.0f; buildZ >= -560.0f; buildZ -= 35.0f) {
+
+        bool leftIsShop = (abs((int)buildZ * 7) % 4 == 0);
+        bool rightIsShop = (abs((int)buildZ * 11) % 3 == 0); 
+
+        // --- LEFT SIDE OF STREET ---
+        if (leftIsShop) {
+            drawShoplot(-85.0f, buildZ, true); 
+        }
+        else {
+            float leftHeight = 100.0f + (abs((int)buildZ * 3 + 7) % 9) * 10.0f;
+            drawSideBuilding(-85.0f, buildZ, leftHeight);
+        }
+
+        // --- RIGHT SIDE OF STREET ---
+        if (rightIsShop) {
+            drawShoplot(85.0f, buildZ, false);
+        }
+        else {
+            float rightHeight = 100.0f + (abs((int)buildZ * 5 + 31) % 9) * 10.0f;
+            drawSideBuilding(85.0f, buildZ, rightHeight);
+        }
+    }
+
+    // 3. HORIZONTAL T-JUNCTION SKYLINE (Left and Right Extensions)
+    // Left side (3 buildings)
+    for (int i = 0; i < 3; i++) {
+        float hx = -90.0f - (i * 45.0f);
+
+        // Chaotic randomizer using sin/cos
+        int randomH1 = abs((int)(sin(hx * 1.5f) * 100.0f));
+        int randomH2 = abs((int)(cos(hx * 2.3f) * 100.0f));
+
+        float h1 = 80.0f + (randomH1 % 10) * 10.0f;
+        float h2 = 90.0f + (randomH2 % 10) * 10.0f;
+
+        drawHorizontalBuilding(hx, -735.0f, h1, true);
+        drawHorizontalBuilding(hx, -590.0f, h2, false);
+    }
+
+    /// Right side (More buildings, tighter gaps)
+    for (int i = 0; i < 25; i++) {
+        float hx = 90.0f + (i * 35.0f);
+
+        // Chaotic randomizer using sin/cos
+        int randomH1 = abs((int)(cos(hx * 1.7f) * 100.0f));
+        int randomH2 = abs((int)(sin(hx * 2.1f) * 100.0f));
+
+        float h1 = 80.0f + (randomH1 % 10) * 10.0f;
+        float h2 = 90.0f + (randomH2 % 10) * 10.0f;
+
+        drawHorizontalBuilding(hx, -735.0f, h1, true);
+        drawHorizontalBuilding(hx, -590.0f, h2, false);
+    }
+
+    // 4. THE TERMINAL BUILDING (At Dead End)
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+    glTranslatef(0.0f, -35.0f, -750.0f);
+    glScalef(80.0f, 110.0f, 50.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+    glTranslatef(0.0f, 21.0f, -750.0f);
+    glScalef(82.0f, 2.0f, 52.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_EMISSION, windowGlow);
+    float startY_DE = 10.0f;
+    for (int row = 0; row < 5; row++) {
+        float wy = startY_DE - (row * 15.0f);
+        glPushMatrix(); glTranslatef(-18.0f, wy, -724.5f); glScalef(16.0f, 8.0f, 1.0f); glutSolidCube(1.0); glPopMatrix();
+        glPushMatrix(); glTranslatef(18.0f, wy, -724.5f); glScalef(16.0f, 8.0f, 1.0f); glutSolidCube(1.0); glPopMatrix();
+    }
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+
+    // --- NEON BILLBOARD
+    // Support Poles
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+    // Left Pole
+    glPushMatrix();
+    glTranslatef(-35.0f, 25.0f, -745.0f);
+    glScalef(4.0f, 30.0f, 4.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+    // Right Pole
+    glPushMatrix();
+    glTranslatef(35.0f, 25.0f, -745.0f);
+    glScalef(4.0f, 30.0f, 4.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+    glPopMatrix();
+
+    // 2. Thick Black Outer Frame
+    glPushMatrix();
+    GLfloat blackFrame[] = { 0.05f, 0.05f, 0.05f, 1.0f }; 
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, blackFrame);
+    glTranslatef(0.0f, 65.0f, -745.0f); 
+    glScalef(120.0f, 60.0f, 3.0f);     
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // 3. Glowing Neon Orange Inner Screen
+    glPushMatrix();
+    GLfloat neonOrangeScreen[] = { 1.0f, 0.45f, 0.0f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, neonOrangeScreen);
+    glMaterialfv(GL_FRONT, GL_EMISSION, neonOrangeScreen);   
+    glTranslatef(0.0f, 65.0f, -743.5f); 
+    glScalef(100.0f, 40.0f, 2.0f);     
+    glutSolidCube(1.0);
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+    glPopMatrix();
+
+    // 4. Perfectly Centered, Larger Black Text
+    glPushMatrix();
+
+    GLfloat textBlack[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, textBlack);
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow); 
+
+    glTranslatef(-41.0f, 58.0f, -742.0f);
+    glScalef(0.12f, 0.12f, 0.04f);
+
+    drawNeonText("NIGHT CITY");
+
+    glPopMatrix();
+
+    // --- TREES ---
+    // Left gap between the terminal building and horizontal buildings
+    drawTree(-58.0f, -735.0f);
+
+    // Right gap between the terminal building and horizontal buildings
+    drawTree(58.0f, -735.0f);
+
+    // 5. MAIN STREET (2 Lanes)
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, streetColor);
+    glTranslatef(0.0f, -90.0f, -387.5f);
+    glScalef(130.0f, 1.0f, 775.0f); 
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // --- PEDESTRIAN WALKWAYS ---
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, walkwayColor);
+
+    // Left Walkway
+    glPushMatrix();
+    glTranslatef(-75.0f, -89.5f, -275.0f); 
+    glScalef(20.0f, 1.0f, 660.0f);         
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Right Walkway
+    glPushMatrix();
+    glTranslatef(75.0f, -89.5f, -275.0f);  
+    glScalef(20.0f, 1.0f, 660.0f);         
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // --- HORIZONTAL PEDESTRIAN WALKWAYS ---
+    // Top Horizontal Walkway
+    glPushMatrix();
+    glTranslatef(155.0f, -89.5f, -746.0f);
+    glScalef(700.0f, 1.0f, 60.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Bottom Left Horizontal Walkway (Meets the left corner)
+    glPushMatrix();
+    glTranslatef(-140.0f, -89.5f, -610.0f); 
+    glScalef(110.0f, 1.0f, 20.0f);         
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Bottom Right Horizontal Walkway (Meets the right corner)
+    glPushMatrix();
+    glTranslatef(295.0f, -89.5f, -610.0f);
+    glScalef(420.0f, 1.0f, 20.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // --- SCATTERED PEDESTRIANS ---
+    // Left Walkway
+    drawPedestrian(-70.0f, -80.0f, 120.0f, shirtGreen, 2.2f);  // Walking back towards camera
+    drawPedestrian(-68.0f, -150.0f, 45.0f, shirtBlue, 2.5f);   // Big guy looking into the street
+    drawPedestrian(-71.0f, -300.0f, 10.0f, fireRed, 1.9f);     // Shorter guy walking forward
+    drawPedestrian(-69.0f, -480.0f, 160.0f, shirtGrey, 2.1f);  // Average guy walking backward
+    drawPedestrian(-70.0f, -550.0f, 90.0f, fireOrange, 2.3f);  // Waiting at the intersection
+
+    // Right Walkway
+    drawPedestrian(70.0f, -100.0f, -45.0f, shirtGrey, 2.4f);   // Looking towards the road
+    drawPedestrian(68.0f, -200.0f, -20.0f, shirtGreen, 2.1f);  // Walking forward
+    drawPedestrian(71.0f, -280.0f, -135.0f, fireRed, 2.2f);    // Walking back slightly
+    drawPedestrian(69.0f, -380.0f, -170.0f, fireYellow, 1.8f); // Short guy walking backward
+    drawPedestrian(70.0f, -520.0f, -90.0f, shirtBlue, 2.6f);   // Very tall guy waiting to cross
+
+    // 5b. T-JUNCTION HORIZONTAL STREET
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, streetColor);
+    glTranslatef(155.0f, -90.0f, -687.5f);
+    glScalef(700.0f, 1.0f, 175.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // 6. INFRASTRUCTURE & ROAD LINES
+    drawTrafficLight(-52.0f, -600.0f, 0.0f, false);
+    drawTrafficLight(52.0f, -610.0f, 90.0f, true);
+    drawTrafficLight(-58.0f, -715.0f, -90.0f, false);
+
+    // --- SOLID WHITE EDGE LINES ---
+    glMaterialfv(GL_FRONT, GL_EMISSION, roadLineGlow);
+
+    // Vertical Street - Left Edge
+    glPushMatrix();
+    glTranslatef(-50.0f, -89.0f, -300.0f);
+    glScalef(2.0f, 1.0f, 600.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Vertical Street - Right Edge
+    glPushMatrix();
+    glTranslatef(50.0f, -89.0f, -300.0f);
+    glScalef(2.0f, 1.0f, 600.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Horizontal Street - Top Edge
+    glPushMatrix();
+    glTranslatef(155.0f, -89.0f, -712.0f);
+    glScalef(700.0f, 1.0f, 2.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Horizontal Street - Bottom Edge Left
+    glPushMatrix();
+    glTranslatef(-125.0f, -89.0f, -612.0f);
+    glScalef(140.0f, 1.0f, 2.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Horizontal Street - Bottom Edge Right
+    glPushMatrix();
+    glTranslatef(278.0f, -89.0f, -612.0f);
+    glScalef(454.0f, 1.0f, 2.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_EMISSION, roadLineGlow);
+    for (float lz = 0.0f; lz >= -600.0f; lz -= 20.0f) {
+        glPushMatrix(); glTranslatef(0.0f, -89.0f, lz); glScalef(1.5f, 1.0f, 14.0f); glutSolidCube(1.0); glPopMatrix();
+    }
+
+    for (float lx = -180.0f; lx <= 500.0f; lx += 20.0f) {
+        if (lx > -65.0f && lx < 65.0f) continue;
+        glPushMatrix(); glTranslatef(lx, -89.0f, -665.0f); glScalef(14.0f, 1.0f, 1.5f); glutSolidCube(1.0); glPopMatrix();
+    }
+    glMaterialfv(GL_FRONT, GL_EMISSION, noGlow);
+
+    // 7. SCRIPTED 8-CAR SEQUENCE & PARKED CARS
+    GLfloat redCar[] = { 0.6f, 0.1f, 0.1f, 1.0f };
+    GLfloat blueCar[] = { 0.1f, 0.2f, 0.6f, 1.0f };
+    GLfloat whiteCar[] = { 0.7f, 0.7f, 0.7f, 1.0f };
+    GLfloat darkCar[] = { 0.2f, 0.2f, 0.22f, 1.0f };
+
+    // --- STATIC PARKED CARS ---
+    // Left Shoulder
+    drawCar(-57.5f, -140.0f, blueCar, 0.0f);
+    drawCar(-57.5f, -290.0f, darkCar, 0.0f);
+    drawCar(-57.5f, -320.0f, whiteCar, 0.0f);
+    drawCar(-57.5f, -480.0f, darkCar, 0.0f);
+
+    // Right Shoulder
+    drawCar(57.5f, -90.0f, redCar, 180.0f);
+    drawCar(57.5f, -240.0f, darkCar, 180.0f);
+    drawCar(57.5f, -390.0f, whiteCar, 180.0f);
+    drawCar(57.5f, -510.0f, redCar, 180.0f);
+    drawCar(57.5f, -540.0f, blueCar, 180.0f);
+
+    // --- MOVING CARS ---
+    float dist = elapsedTime * 0.1f;
+    float cx, cz_pos, cRot;
+
+    // LEFT LANE
+    getPath_MainStop(dist, -583.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, redCar, cRot);
+
+    getPath_MainStop(dist - 140.0f, -543.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, whiteCar, cRot);
+
+    getPath_MainStop(dist - 280.0f, -503.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, blueCar, cRot);
+
+    getPath_MainStop(dist - 420.0f, -463.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, redCar, cRot);
+
+    // RIGHT LANE 
+    getPath3_StraightDown(dist - 100.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, blueCar, cRot);
+
+    getPath4_RightToMain(dist - 550.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, whiteCar, cRot);
+
+    getPath4_RightToMain(dist - 900.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, redCar, cRot);
+
+    getPath4_RightToMain(dist - 1250.0f, cx, cz_pos, cRot);
+    drawCar(cx, cz_pos, whiteCar, cRot);
+
+    glPopMatrix();
+}
+
+void drawCatwalk(float x, float z) {
+    glPushMatrix();
+    glTranslatef(x, 55.0f, z);
+
+    glScalef(1.5f, 1.5f, 1.5f);
+
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, industrialMetal);
+    glPushMatrix(); glScalef(20.0f, 1.0f, 6.0f); glutSolidCube(1.0); glPopMatrix();
+
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+    for (int i = -1; i <= 1; i += 2) {
+        for (int j = -1; j <= 1; j += 2) {
+            glPushMatrix(); glTranslatef(i * 9.0f, -2.5f, j * 2.5f);
+            glScalef(1.0f, 4.0f, 1.0f); glutSolidCube(1.0); glPopMatrix();
+        }
+    }
+
+    glPushMatrix(); glTranslatef(0.0f, -2.5f, 3.5f);
+    glBegin(GL_LINES);
+    glVertex3f(-1.0f, 0, 0); glVertex3f(-1.0f, 5, 0);
+    glVertex3f(1.0f, 0, 0); glVertex3f(1.0f, 5, 0);
+    for (int i = 0; i < 6; i++) {
+        glVertex3f(-1.0f, i * 1.0f, 0); glVertex3f(1.0f, i * 1.0f, 0);
+    }
+    glEnd();
+    glPopMatrix();
+    glPopMatrix();
+}
+
+void drawACUnit(float xPos, float zPos, float time) {
+    glPushMatrix();
+    glTranslatef(xPos, 53.0f, zPos);
+
+    glScalef(1.5f, 1.5f, 1.5f);
+
+    // Main housing
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, doorMetal);
+    glScalef(6.0f, 4.0f, 4.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Roof cap
+    glPushMatrix();
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+    glTranslatef(0.0f, 2.02f, 0.0f);
+    glScalef(3.6f, 0.05f, 2.4f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Fan face
+    glPushMatrix();
+    glTranslatef(-0.5f, 0.4f, -2.01f);
+    glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+
+    GLfloat holeColor[] = { 0.02f, 0.02f, 0.02f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, holeColor);
+    drawFlatCircle(1.5f, 20);
+
+    GLfloat hubColor[] = { 0.4f, 0.4f, 0.45f, 1.0f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, hubColor);
+    glTranslatef(0.0f, 0.01f, 0.0f);
+    drawFlatCircle(0.4f, 12);
+
+    glDisable(GL_LIGHTING);
+    glColor3f(0.5f, 0.5f, 0.55f);
+    glLineWidth(2.0f);
+
+    glPushMatrix();
+    glRotatef(time * 0.2f, 0.0f, 1.0f, 0.0f); // Spinning fan blades
+    glBegin(GL_LINES);
+    for (int i = 0; i < 8; i++) {
+        float angle = i * (PI / 4.0f);
+        glVertex3f(0.0f, 0.02f, 0.0f);
+        glVertex3f(1.5f * cosf(angle), 0.02f, 1.5f * sinf(angle));
+    }
+    for (float r = 0.6f; r <= 1.2f; r += 0.3f) {
+        for (int i = 0; i < 20; i++) {
+            float a1 = i * (2.0f * PI / 20.0f);
+            float a2 = (i + 1) * (2.0f * PI / 20.0f);
+            glVertex3f(r * cosf(a1), 0.02f, r * sinf(a1));
+            glVertex3f(r * cosf(a2), 0.02f, r * sinf(a2));
+        }
+    }
+    glEnd();
+    glPopMatrix();
+
+    glLineWidth(1.0f);
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+    glPopMatrix();
+}
+
+// --- STATIC ROOFTOP BREACH DOORS ---
+void drawStaticRooftopDoors() {
+    glPushMatrix();
+
+    glTranslatef(0.0f, 51.5f, 35.0f);
+    glScalef(1.5f, 1.5f, 1.5f);
+
+    // The Concrete Housing / Frame
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+    glPushMatrix();
+    glTranslatef(0.0f, 2.0f, 3.5f);
+    glScalef(6.0f, 4.0f, 7.0f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // The Metal Doors (Locked Closed)
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, doorMetal);
+
+    // Left Door (Closed)
+    glPushMatrix();
+    glTranslatef(-1.0f, 2.0f, 0.0f); 
+    glScalef(2.0f, 3.5f, 0.2f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    // Right Door (Closed)
+    glPushMatrix();
+    glTranslatef(1.0f, 2.0f, 0.0f);
+    glScalef(2.0f, 3.5f, 0.2f);
+    glutSolidCube(1.0);
+    glPopMatrix();
+
+    glPopMatrix();
+}
+
+void drawDetailedRooftop() {
+    glPushMatrix();
+
+    // 1. Top-Left AC Unit 
+    drawACUnit(-15.0f, 15.0f, elapsedTime);
+
+    // 2. Bottom-Right AC Unit (Below the helipad)
+    drawACUnit(18.0f, 32.0f, elapsedTime);
+
+    // 3. Catwalk
+    glPushMatrix();
+    glTranslatef(-25.0f, 1.0f, 25.0f);
+    glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+    drawCatwalk(0.0f, 0.0f);
+    glPopMatrix();
+
+    // 4. Static Doors
+    drawStaticRooftopDoors();
+
+    glPopMatrix();
+}
+
+// --- SCENE 6 ENVIRONMENT ---
+void drawScene6Environment() {
+    glPushMatrix();
+
+    // The Target Helipad Building
+    glPushMatrix();
+    glTranslatef(0.0f, -25.0f, 0.0f);
+    drawLaunchBuilding(0.0f, 0.0f);
+    drawDetailedRooftop();
+    glPopMatrix();
+
+    for (float buildZ = 350.0f; buildZ >= -300.0f; buildZ -= 35.0f) {
+
+        // Chaotic randomizer using sin/cos
+        int randomLeft = abs((int)(sin(buildZ * 1.5f) * 100.0f));
+        int randomRight = abs((int)(cos(buildZ * 2.3f) * 100.0f));
+
+        float leftHeight = 85.0f + (randomLeft % 8) * 10.0f;
+        float rightHeight = 85.0f + (randomRight % 8) * 10.0f;
+
+        drawSideBuilding(-75.0f, buildZ, leftHeight);
+        drawSideBuilding(75.0f, buildZ, rightHeight);
+    }
+
+    glPopMatrix();
+}
+
+// --- FULL MOON MODEL ---
+void drawMoon() {
+    glPushMatrix();
+    glTranslatef(120.0f, 220.0f, -650.0f);
+
+    glDisable(GL_LIGHTING);
+
+    // Outer Soft Glow (Pale Yellow)
+    glColor3f(1.0f, 1.0f, 0.8f);
+    glutSolidSphere(35.0, 20, 20);
+
+    // Inner Bright Core (Pure White)
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glutSolidSphere(32.0, 20, 20);
+
+    glEnable(GL_LIGHTING);
+    glPopMatrix();
+}
+
+// MASTER DISPLAY
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glLoadIdentity();
+
+    float posX = 0.0f, posY = 100.0f, posZ = 15.0f;
+    float pitch = 0.0f, yaw = 0.0f, roll = 0.0f;
+    float runSwing = 0.0f, wingAmount = 0.0f;
+
+    float chuteAmount = 0.0f;
+    bool holdingChute = false;
+    bool superheroLanding = false;
+
+    float camX = 0.0f, camY = 220.0f, camZ = 12.0f;
+    float lookX = 0.0f, lookY = 0.0f, lookZ = 0.0f;
+    float upX = 0.0f, upY = 0.0f, upZ = -1.0f;
+
+    // --- ANIMATION TIMELINE (Total 20s = 20000ms) ---
+   
+    // SCENE 1: The Descent Starts (0 - 1250ms)
+    if (elapsedTime <= 1250) {
+        posZ = 15.0f - (elapsedTime * 0.012f);
+        pitch = 10.0f;
+        runSwing = sin(elapsedTime * 0.02f) * 45.0f;
+
+        camX = 0.0f; camY = 220.0f; camZ = posZ - 3.0f;
+        lookX = posX; lookY = posY; lookZ = posZ;
+        upY = 0.0f; upZ = -1.0f;
+    }
+    // SCENE 2: The Jump Camera Rotate (1250 - 2500ms)
+    else if (elapsedTime <= 2500) {
+        float jumpTime = elapsedTime - 1250.0f;
+        float t = jumpTime / 1250.0f;
+
+        posZ = 0.0f - (jumpTime * 0.012f);
+        posY = 100.0f - (jumpTime * 0.015f);
+
+        pitch = 10.0f + (t * 80.0f);
+        runSwing = (1.0f - t) * (sin(1250.0f * 0.02f) * 45.0f);
+
+        camX = t * 60.0f;
+
+        camY = 220.0f - (t * (220.0f - (posY + 60.0f)));
+        camZ = (posZ - 3.0f) + (t * 63.0f);
+        lookX = posX; lookY = posY; lookZ = posZ;
+        upY = t; upZ = -1.0f + t;
+    }
+    else {
+        // Base glide mechanics for the main flight
+        float glideTime = elapsedTime - 2500.0f;
+        float startY = 91.0f - (1250.0f * 0.015f);
+        float startZ = 0.0f - (1250.0f * 0.012f);
+
+        posY = startY - (glideTime * 0.005f);
+        posZ = startZ - (glideTime * 0.07f);
+
+        pitch = 90.0f;
+
+        float wingDeploy = glideTime / 1000.0f;
+        if (wingDeploy > 1.0f) wingDeploy = 1.0f;
+        wingAmount = wingDeploy;
+
+        // SCENE 3: Front-Facing Low Angle (2500 - 4000ms)
+        if (elapsedTime <= 4000) {
+            camX = 0.0f;
+            camY = posY - 15.0f;
+            camZ = posZ - 35.0f;
+
+            lookX = posX;
+            lookY = posY;
+            lookZ = posZ;
+
+            upY = 1.0f; upZ = 0.0f;
+        }
+        // SCENE 4: Back View Push-In with Subtle Sway (4000 - 5500ms)
+        else if (elapsedTime <= 5500) {
+            float t = (elapsedTime - 4000.0f) / 1500.0f;
+
+            camX = 0.0f;
+            camY = (posY + 30.0f) * (1.0f - t) + (posY + 12.0f) * t;
+            camZ = (posZ + 80.0f) * (1.0f - t) + (posZ + 30.0f) * t;
+
+            lookX = posX;
+            lookY = posY;
+            lookZ = posZ;
+
+            upY = 1.0f; upZ = 0.0f;
+            roll = sinf(elapsedTime * 0.003f) * 3.0f;
+        }
+        // SCENE 5: Straight Glide (5500 - 9850ms)
+        else if (elapsedTime <= 9850) {
+            posX = 0.0f;
+            roll = sinf(elapsedTime * 0.003f) * 3.0f;
+
+            camX = posX;
+            camY = posY + 12.0f;
+            camZ = posZ + 30.0f;
+
+            lookX = posX;
+            lookY = posY;
+            lookZ = posZ;
+
+            upY = 1.0f; upZ = 0.0f;
+        }
+        // PRE-TURN PHASE (9850 - 10350ms)
+        else if (elapsedTime <= 10350) {
+            posX = 0.0f;
+            roll = sinf(elapsedTime * 0.003f) * 3.0f;
+
+            camX = posX;
+            camY = posY + 12.0f;
+            camZ = posZ + 30.0f;
+
+            lookX = posX;
+            lookY = posY;
+            lookZ = posZ;
+
+            upY = 1.0f; upZ = 0.0f;
+        }
+        // SCENE 5b: TURN PHASE (10350 - 12500ms)
+        else if (elapsedTime <= 12500) {
+            float turnTime = elapsedTime - 10350.0f;
+            float t = turnTime / 1500.0f;
+            if (t > 1.0f) t = 1.0f;
+
+            yaw = t * -75.0f;
+            roll = t * -90.0f;
+
+            posX = (turnTime * turnTime * 0.00015f);
+            posZ += (turnTime * turnTime * 0.000015f);
+
+            camX = posX;
+            camY = posY + 12.0f;
+            camZ = posZ + 30.0f;
+            upY = 1.0f; upZ = 0.0f;
+
+            lookX = posX;
+            lookY = posY;
+            lookZ = posZ;
+        }
+        // SCENE 6: Glide Towards Helipad (12500 - 15000ms)
+        else if (elapsedTime <= 15000) {
+            float scene6Time = elapsedTime - 12500.0f;
+
+            float levelT = scene6Time / 1500.0f;
+            if (levelT > 1.0f) levelT = 1.0f;
+
+            camX = 0.0f;
+            camY = 70.0f;
+            camZ = 140.0f;
+
+            lookX = 0.0f;
+            lookY = 35.0f;
+            lookZ = 0.0f;
+
+            upY = 1.0f; upZ = 0.0f;
+
+            posX = 0.0f;
+            posY = 85.0f - (scene6Time * 0.01f);
+            posZ = -150.0f + (scene6Time * 0.04f);
+
+            pitch = 75.0f;
+            yaw = 180.0f;
+
+            float bankRoll = -90.0f * (1.0f - levelT);
+            float wobbleRoll = sinf(scene6Time * 0.003f) * 5.0f * levelT;
+            roll = bankRoll + wobbleRoll;
+
+            wingAmount = 1.0f;
+            runSwing = 0.0f;
+        }
+        // SCENE 7: Chute Deploy (15000 - 17000ms)
+        else if (elapsedTime <= 17000) {
+            float scene7Time = elapsedTime - 15000.0f;
+            float chuteT = scene7Time / 1500.0f;
+            if (chuteT > 1.0f) chuteT = 1.0f;
+
+            camX = 0.0f;
+            camY = 70.0f - (scene7Time * 0.003f);
+            camZ = 140.0f - (scene7Time * 0.012f);
+            lookX = 0.0f; lookY = 35.0f; lookZ = 0.0f;
+            upY = 1.0f; upZ = 0.0f;
+
+            posX = 0.0f;
+            posY = 60.0f - (scene7Time * 0.01f);
+
+            posZ = -50.0f + (scene7Time * 0.0255f);
+
+            pitch = 75.0f * (1.0f - chuteT);
+            yaw = 180.0f;
+            roll = sinf(scene7Time * 0.002f) * 2.0f;
+            wingAmount = 1.0f - chuteT;
+            chuteAmount = chuteT;
+            holdingChute = (chuteT > 0.1f);
+            superheroLanding = false;
+            }
+            // SCENE 8: The Landing & Tactical Sprint (Left AC Unit) (17000 - 20000ms)
+        else {
+            float scene8Time = elapsedTime - 17000.0f;
+
+            float startX = 0.0f;
+            float startZ = 1.0f;
+
+                float targetX = -15.0f;
+                float targetZ = 1.0f;
+
+                float runTime = scene8Time - 600.0f;
+
+                if (runTime <= 0.0f) {
+                    posX = startX;
+                    posZ = startZ;
+                }
+                else {
+                    float runT = runTime / 1000.0f;
+                    if (runT > 1.0f) runT = 1.0f;
+
+                    posX = startX + (targetX - startX) * runT;
+                    posZ = startZ + (targetZ - startZ) * runT;
+                }
+
+                if (scene8Time < 350.0f) {
+                    posY = 40.0f - (scene8Time * 0.0157f);
+                }
+                else if (runTime > 1000.0f) {
+                    float crouchT = (runTime - 1000.0f) / 200.0f;
+                    if (crouchT > 1.0f) crouchT = 1.0f;
+                    posY = 34.5f - (crouchT * 2.5f);
+                }
+                else {
+                    posY = 34.5f;
+                }
+
+                camX = 0.0f;
+                camY = 48.0f;
+                camZ = posZ - 45.0f;
+
+                lookX = 0.0f;
+                lookY = 30.0f;
+                lookZ = 35.0f;
+
+                upY = 1.0f; upZ = 0.0f;
+
+                // 4. ANIMATION LOGIC
+                if (scene8Time < 350.0f) {
+                    pitch = 0.0f;
+                    holdingChute = true;
+                    yaw = 180.0f;
+                    runSwing = 0.0f;
+                }
+                else {
+                    holdingChute = false;
+
+                    if (runTime < 0.0f) {
+                        float impactT = (scene8Time - 350.0f) / 250.0f;
+                        pitch = 25.0f * (1.0f - impactT);
+                        yaw = 180.0f;
+                        runSwing = 0.0f;
+                    }
+                    else if (runTime < 1000.0f) {
+                        pitch = 10.0f;
+                        yaw = 90.0f;
+                        runSwing = sin(runTime * 0.045f) * 50.0f;
+                    }
+                    else {
+                        pitch = 0.0f;
+                        yaw = 180.0f;
+                        runSwing = 0.0f;
+                    }
+                }
+
+                roll = 0.0f;
+                wingAmount = 0.0f;
+
+                chuteAmount = 1.0f - (scene8Time / 350.0f);
+                if (chuteAmount < 0.0f) chuteAmount = 0.0f;
+                superheroLanding = false;
+                }
+    }
+
+    drawSky();
+    gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+    drawMoon();
+
+    // Dynamically swap the environments
+    if (elapsedTime <= 12500) {
+        drawCity();
+        drawExplosion(elapsedTime);
+    }
+    else {
+        drawScene6Environment();
+    }
+
+    glPushMatrix();
+    glTranslatef(posX, posY, posZ);
+    glScalef(2.5f, 2.5f, 2.5f);
+
+    drawOperative(pitch, yaw, roll, runSwing, wingAmount, holdingChute, superheroLanding);
+
+    drawParachute(chuteAmount);
+    glPopMatrix();
+
+    glFlush();
+    glutSwapBuffers();
+}
+
+void reshape(int w, int h) {
+    int target_w = w;
+    int target_h = (w * 3) / 4;
+    if (target_h > h) { target_h = h; target_w = (h * 4) / 3; }
+    glViewport((w - target_w) / 2, (h - target_h) / 2, target_w, target_h);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(50.0, 4.0 / 3.0, 0.1, 1000.0);
+    glMatrixMode(GL_MODELVIEW);
+}
+
+// --- KEYBOARD INPUT ---
+void keyboard(unsigned char key, int x, int y) {
+    if (key == 'p' || key == 'P') {
+        isPaused = !isPaused; // Toggles pause on and off
+    }
+}
+
+void idle() {
+    ULONGLONG currentTick = GetTickCount64();
+    while (GetTickCount64() - currentTick < 1000 / FPS);
+
+    ULONGLONG newTick = GetTickCount64();
+    ULONGLONG delta = newTick - lastFrameTime;
+    lastFrameTime = newTick;
+
+    // --- PAUSE LOGIC ---
+    if (isPaused) {
+        startTime += delta;
+    }
+    else {
+        elapsedTime = (float)(newTick - startTime);
+
+        if (elapsedTime > 20000) {
+            startTime = newTick;
+        }
+    }
+
+    glutPostRedisplay();
+}
+
+void initGL() {
+    startTime = GetTickCount64();
+    lastFrameTime = startTime;
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    GLfloat lightPos[] = { 1.0f, 1.0f, 0.5f, 0.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+    GLfloat lightSpecular[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_SPECULAR, lightSpecular);
+    glEnable(GL_NORMALIZE);
+    glEnable(GL_DEPTH_TEST);
+}
+
+int main(int argc, char** argv) {
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB);
+    glutInit(&argc, argv);
+    glutInitWindowSize(SCREENWIDTH, SCREENHEIGHT);
+    glutCreateWindow("Act 1: The Epic Descent");
+    glutReshapeFunc(reshape);
+    glutDisplayFunc(display);
+    glutIdleFunc(idle);
+
+    glutKeyboardFunc(keyboard);
+
+    initGL();
+    glutMainLoop();
+    return 0;
+}

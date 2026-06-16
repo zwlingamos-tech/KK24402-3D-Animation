@@ -1,0 +1,1731 @@
+#include <windows.h>
+#include <stdlib.h>
+#include <GL\gl.h>
+#include <GL\glu.h>
+#include <GL\glut.h>
+#include <math.h>
+
+#define SCREENWIDTH 800
+#define SCREENHEIGHT 600
+#define FPS 60
+#define PI 3.14159265358979323846
+
+ULONGLONG startTime;
+float elapsedTime = 0.0f;
+
+float globalFadeAlpha = 0.0f; // Transparency Variable
+
+// --- INTERACTIVE CAMERA CONTROLS ---
+bool freeCamMode = false; // False = Cinematic Timeline, True = Keyboard Control
+float freeCamX = 10.0f, freeCamY = 55.0f, freeCamZ = 30.0f; // Initial free cam position
+float freeLookX = -40.0f, freeLookY = 58.0f, freeLookZ = 10.0f; // Initial focal point
+
+// ---  COLOR PALETTE ---
+GLfloat skyColor[] = { 15.0f / 255.0f, 20.0f / 255.0f, 40.0f / 255.0f, 1.0f };
+GLfloat bldgColor[] = { 0.45f, 0.45f, 0.48f, 1.0f };
+GLfloat sideRoofCap[] = { 0.55f, 0.55f, 0.58f, 1.0f };
+GLfloat suitColor[] = { 0.08f, 0.08f, 0.08f, 1.0f }; // Dark black for the overcoat
+GLfloat gearColor[] = { 0.02f, 0.02f, 0.02f, 1.0f };
+GLfloat neonBlue[] = { 0.0f,  0.8f,  1.0f,  1.0f };
+GLfloat visorBase[] = { 0.0f,  0.2f,  0.6f,  1.0f };
+GLfloat skinTone[] = { 255.0f / 255.0f, 218.0f / 255.0f, 185.0f / 255.0f, 1.0f };
+GLfloat windowGlow[] = { 0.9f, 0.8f, 0.2f, 1.0f };
+GLfloat clear[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+GLfloat metalDark[] = { 0.12f, 0.12f, 0.14f, 1.0f }; // Gun metal steel chassis
+GLfloat metalGrey[] = { 0.22f, 0.22f, 0.25f, 1.0f }; // Mechanical details
+GLfloat heatGlow[] = { 0.00f, 0.80f, 1.0f,  1.0f }; // Cyan energy core tint
+GLfloat industrialMetal[] = { 0.2f, 0.2f, 0.22f, 1.0f };
+GLfloat doorMetal[] = { 0.25f, 0.25f, 0.28f, 1.0f };
+
+// --- 3D ANIMATED CHARACTER MODEL ---
+void drawOperative(float pitchAngle, float yawAngle, float rollAngle, int pose, float poseAngle) {
+    glPushMatrix();
+        glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+        glRotatef(yawAngle, 0.0f, 1.0f, 0.0f);
+        glRotatef(pitchAngle, 1.0f, 0.0f, 0.0f);
+        glRotatef(rollAngle, 0.0f, 1.0f, 0.0f);
+
+        GLfloat suitHighlight[] = { 0.4f, 0.4f, 0.4f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_SPECULAR, suitHighlight);
+        glMaterialf(GL_FRONT, GL_SHININESS, 30.0f);
+
+        // LIMB ROTATION STATE CALCULATOR
+        float rightArmX = 0.0f, rightArmZ = 0.0f;
+        float leftArmX = 0.0f, leftArmZ = 0.0f;
+        float rightLegX = 0.0f, rightLegZ = 0.0f;
+        float leftLegX = 0.0f, leftLegZ = 0.0f;
+
+        if (pose == 1) { // Pose 1: Standing Still / Running
+            // Shift limb angle
+            leftArmX = poseAngle;
+            rightArmX = -poseAngle;
+            leftLegX = -poseAngle;
+            rightLegX = poseAngle;
+
+            // Stay perfectly flush with the body side profiles
+            rightArmZ = leftArmZ = rightLegZ = leftLegZ = 0.0f;
+        }
+
+        else if (pose == 2) { // Pose 2: Surprised
+            rightArmZ = poseAngle;  // Throws right arm out sideways
+            leftArmZ = -poseAngle;   // Throws left arm out sideways
+            rightArmX = leftArmX = 35.0f; // Pulls both arms back defensively
+
+            rightLegZ = poseAngle * 0.4f;  // Spreads right leg slightly outward
+            leftLegZ = -poseAngle * 0.4f; // Spreads left leg slightly outward
+            rightLegX = leftLegX = 0.0f;
+        }
+
+        else if (pose == 3) { // Pose 3: Jumping
+            // Right Arm
+            rightArmX = -170.0f; // Rotates almost fully around to point straight up
+            rightArmZ = -5.0f;   // Kept close to the ear
+
+            // Left Arm
+            leftArmX = 45.0f;   // Pushed behind the torso
+            leftArmZ = 30.0f;   // Flared out to the left side
+
+            // Legs
+            rightLegX = 35.0f;   // Trailing backward
+            leftLegX = 20.0f;   // Trailing backward at a slightly different angle
+            rightLegZ = 10.0f;   // Slightly spread
+            leftLegZ = -10.0f;
+        }
+
+
+        // MAIN OVERCOAT (Back and Sides)
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glScalef(0.85f, 1.25f, 0.4f); // Made slightly wider to look like a bulky coat
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // WHITE SHIRT (Chest Plate)
+        glPushMatrix();
+            GLfloat shirtColor[] = { 0.85f, 0.85f, 0.85f, 1.0f }; // Clean white
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, shirtColor);
+            glTranslatef(0.0f, 0.1f, 0.21f); // Shifted slightly out the front of the body
+            glScalef(0.4f, 1.0f, 0.02f);     // Thin flat box
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // RED TIE (Center Strip)
+        glPushMatrix();
+            GLfloat tieColor[] = { 0.7f, 0.05f, 0.05f, 1.0f }; // Deep crimson red
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, tieColor);
+            glTranslatef(0.0f, 0.1f, 0.23f); // Shifted slightly in front of the white shirt
+            glScalef(0.08f, 0.8f, 0.02f);    // Long, narrow strip
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // OPEN OVERCOAT LAPELS (Angles outward like an open coat)
+        // Left Lapel
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glTranslatef(-0.2f, 0.0f, 0.22f);
+            glRotatef(12.0f, 0.0f, 1.0f, 0.0f);
+            glScalef(0.25f, 1.2f, 0.05f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // Right Lapel
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glTranslatef(0.2f, 0.0f, 0.22f);
+            glRotatef(-12.0f, 0.0f, 1.0f, 0.0f);
+            glScalef(0.25f, 1.2f, 0.05f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // HEAD & VISOR
+        glPushMatrix();
+            glTranslatef(0.0f, 0.85f, 0.0f);
+            glRotatef(-pitchAngle, 1.0f, 0.0f, 0.0f);
+            glRotatef(-yawAngle * 0.0f, 0.0f, 1.0f, 0.0f);
+            glRotatef(pitchAngle, 1.0f, 0.0f, 0.0f);
+
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, skinTone);
+            GLfloat skinHighlight[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+            glMaterialfv(GL_FRONT, GL_SPECULAR, skinHighlight);
+            glMaterialf(GL_FRONT, GL_SHININESS, 15.0f);
+            glutSolidSphere(0.3, 20, 20);
+
+            glPushMatrix();
+                glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, visorBase);
+                glMaterialfv(GL_FRONT, GL_EMISSION, neonBlue);
+                GLfloat glassHighlight[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+                glMaterialfv(GL_FRONT, GL_SPECULAR, glassHighlight);
+                glMaterialf(GL_FRONT, GL_SHININESS, 100.0f);
+                glTranslatef(0.0f, 0.1f, 0.28f);
+                glScalef(0.45f, 0.15f, 0.2f);
+                glutSolidCube(1.0);
+                glMaterialfv(GL_FRONT, GL_EMISSION, clear);
+            glPopMatrix();
+        glPopMatrix();
+
+        // LIMBS
+        glMaterialfv(GL_FRONT, GL_SPECULAR, suitHighlight);
+        glMaterialf(GL_FRONT, GL_SHININESS, 30.0f);
+
+        // Left Arm
+        glPushMatrix();
+            glTranslatef(-0.5f, 0.5f, 0.0f); // Shoulder joint pivot
+            glRotatef(leftArmX, 1.0f, 0.0f, 0.0f); // Forward/Back rotation
+            glRotatef(leftArmZ, 0.0f, 0.0f, 1.0f); // Outward splay rotation
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glPushMatrix();
+                glTranslatef(0.0f, -0.4f, 0.0f);
+                glScalef(0.2f, 0.8f, 0.2f);
+                glutSolidCube(1.0);
+            glPopMatrix();
+        glPopMatrix();
+
+        // Right Arm
+        glPushMatrix();
+            glTranslatef(0.5f, 0.5f, 0.0f); // Shoulder joint pivot
+            glRotatef(rightArmX, 1.0f, 0.0f, 0.0f);  // Forward/Back rotation
+            glRotatef(rightArmZ, 0.0f, 0.0f, 1.0f);  // Outward splay rotation
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glPushMatrix();
+                glTranslatef(0.0f, -0.4f, 0.0f);
+                glScalef(0.2f, 0.8f, 0.2f);
+                glutSolidCube(1.0);
+            glPopMatrix();
+        glPopMatrix();
+
+        // Right Leg
+        glPushMatrix();
+            glTranslatef(0.25f, -0.6f, 0.0f); // Hip joint pivot
+            glRotatef(rightLegX, 1.0f, 0.0f, 0.0f); // Forward/Back rotation
+            glRotatef(rightLegZ, 0.0f, 0.0f, 1.0f); // Outward splay rotation
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+            glTranslatef(0.0f, -0.5f, 0.0f);
+            glScalef(0.25f, 1.0f, 0.25f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // Left Leg
+        glPushMatrix();
+            glTranslatef(-0.25f, -0.6f, 0.0f); // Hip joint pivot
+            glRotatef(leftLegX, 1.0f, 0.0f, 0.0f);  // Forward/Back rotation
+            glRotatef(leftLegZ, 0.0f, 0.0f, 1.0f);  // Outward splay rotation
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+            glTranslatef(0.0f, -0.5f, 0.0f);
+            glScalef(0.25f, 1.0f, 0.25f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+    glPopMatrix();
+}
+
+void drawGunner(float pitchAngle, float yawAngle, float rollAngle, int pose) {
+    glPushMatrix();
+        glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+        glRotatef(yawAngle, 0.0f, 1.0f, 0.0f);
+        glRotatef(pitchAngle, 1.0f, 0.0f, 0.0f);
+        glRotatef(rollAngle, 0.0f, 1.0f, 0.0f);
+
+        GLfloat suitHighlight[] = { 0.4f, 0.4f, 0.4f, 1.0f };
+        glMaterialfv(GL_FRONT, GL_SPECULAR, suitHighlight);
+        glMaterialf(GL_FRONT, GL_SHININESS, 30.0f);
+
+        // LIMB ROTATION STATE CALCULATOR
+        float rightArmX = 0.0f, rightArmZ = 0.0f;
+        float leftArmX = 0.0f, leftArmZ = 0.0f;
+        float rightLegX = 0.0f, rightLegZ = 0.0f;
+        float leftLegX = 0.0f, leftLegZ = 0.0f;
+
+        if (pose == 1) { // Pose 1: Holding Minigun
+            // Right Arm
+            rightArmX = -50.0f;  // Slight forward angle reach
+            rightArmZ = 10.0f;   // Kept tucked tight to the right hip outer frame
+
+            // Left Arm
+            leftArmX = -70.0f;  // Reaches down and forward
+            leftArmZ = -15.0f; // Swings inward across the body to meet the weapon centerline
+
+            // Right Leg
+            rightLegX = 15.0f;   // Slanted back slightly
+            rightLegZ = 12.0f;   // Spread outward for structural balance
+
+            // Left Leg
+            leftLegX = -15.0f;  // Slanted forward slightly
+            leftLegZ = -12.0f; // Spread outward for structural balance
+        }
+        else if (pose == 2) { // Pose 2: Holding Out Hand
+            // Left Arm
+            leftArmX = 20.0f;   // Extended behind the body line
+            leftArmZ = -60.0f;   // Angled slightly outward to grasp the door pillar
+
+            // Right Arm
+            rightArmX = 25.0f;  // Projected out in front 
+            rightArmZ = 55.0f;  // Reaching down towards the open drop space
+
+            // Legs
+            rightLegX = 0.0f;
+            rightLegZ = 30.0f;  // Planted firmly outward inside the cabin floor
+            leftLegX = 5.0f;  // Stepped forward near the open ledge
+            leftLegZ = -40.0f;
+        }
+        else if (pose == 3) { // Pose 3: Putting down minigun
+            //Right Arm
+            rightArmX = -70.0f;  // Extended downward
+            rightArmZ = 90.0f;  // Tucked slightly inward
+
+            // Left Arm
+            leftArmX = -65.0f;  // Angled low
+            leftArmZ = -40.0f;   // Crossing inward slightly
+
+            // Squatting Legs
+            rightLegX = -45.0f;  // Thigh bent up/forward
+            rightLegZ = 5.0f;
+            leftLegX = -45.0f;  // Thigh bent up/forward
+            leftLegZ = -5.0f;
+        }
+
+        // MAIN OVERCOAT
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glScalef(0.85f, 1.25f, 0.4f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // WHITE SHIRT
+        glPushMatrix();
+            GLfloat shirtColor[] = { 0.85f, 0.85f, 0.85f, 1.0f };
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, shirtColor);
+            glTranslatef(0.0f, 0.1f, 0.21f);
+            glScalef(0.4f, 1.0f, 0.02f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // RED TIE
+        glPushMatrix();
+            GLfloat tieColor[] = { 0.7f, 0.05f, 0.05f, 1.0f };
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, tieColor);
+            glTranslatef(0.0f, 0.1f, 0.23f);
+            glScalef(0.08f, 0.8f, 0.02f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // OPEN OVERCOAT LAPELS
+        // Left Lapel
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glTranslatef(-0.2f, 0.0f, 0.22f);
+            glRotatef(12.0f, 0.0f, 1.0f, 0.0f);
+            glScalef(0.25f, 1.2f, 0.05f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // Right Lapel
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glTranslatef(0.2f, 0.0f, 0.22f);
+            glRotatef(-12.0f, 0.0f, 1.0f, 0.0f);
+            glScalef(0.25f, 1.2f, 0.05f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // HEAD & STYLIZED BLACK GLASSES
+        glPushMatrix();
+            glTranslatef(0.0f, 0.85f, 0.0f);
+            glRotatef(75, 0.0f, 1.0f, 0.0f); // Looking to the left
+            glRotatef(-pitchAngle, 1.0f, 0.0f, 0.0f);
+            glRotatef(-yawAngle * 0.0f, 0.0f, 1.0f, 0.0f);
+            glRotatef(pitchAngle, 1.0f, 0.0f, 0.0f);
+
+            // Draw Base Skin Head
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, skinTone);
+            GLfloat skinHighlight[] = { 0.2f, 0.2f, 0.2f, 1.0f };
+            glMaterialfv(GL_FRONT, GL_SPECULAR, skinHighlight);
+            glMaterialf(GL_FRONT, GL_SHININESS, 15.0f);
+            glutSolidSphere(0.3, 20, 20);
+
+            // GLASSES MATERIAL PROPERTIES (Ultra Glossy / Dark Jet Black)
+            GLfloat glassesBlack[] = { 0.02f, 0.02f, 0.03f, 1.0f };
+            GLfloat glassesWhite[] = { 0.95f, 0.95f, 0.95f, 1.0f };
+            GLfloat glassesSpecular[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+            // LEFT LENS BLOCK 
+            glPushMatrix();
+                glTranslatef(-0.11f, 0.05f, 0.28f); // Positioned on left eye area
+                // Base Black Lens Frame
+                glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, glassesBlack);
+                glMaterialfv(GL_FRONT, GL_SPECULAR, glassesSpecular);
+                glMaterialf(GL_FRONT, GL_SHININESS, 128.0f);
+                glPushMatrix();
+                    glScalef(0.18f, 0.12f, 0.04f);
+                    glutSolidCube(1.0);
+                glPopMatrix();
+                // Left Lens Diagonal Stylized Shine (White Strip)
+                glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, glassesWhite);
+                glMaterialfv(GL_FRONT, GL_EMISSION, glassesWhite); // Self-illuminates to stand out
+                glPushMatrix();
+                    glTranslatef(0.0f, 0.0f, 0.022f);  // Stick precisely to front face of lens
+                    glRotatef(45.0f, 0.0f, 0.0f, 1.0f); // Diagonal stripe tilt
+                    glScalef(0.03f, 0.15f, 0.001f);    // Very thin ribbon line
+                    glutSolidCube(1.0);
+                glPopMatrix();
+                glMaterialfv(GL_FRONT, GL_EMISSION, clear); // Clear glow emission
+            glPopMatrix();
+
+            // RIGHT LENS BLOCK
+            glPushMatrix();
+                glTranslatef(0.11f, 0.05f, 0.28f); // Positioned on right eye area
+                // Base Black Lens Frame
+                glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, glassesBlack);
+                glMaterialfv(GL_FRONT, GL_SPECULAR, glassesSpecular);
+                glMaterialf(GL_FRONT, GL_SHININESS, 128.0f);
+                glPushMatrix();
+                    glScalef(0.18f, 0.12f, 0.04f);
+                    glutSolidCube(1.0);
+                glPopMatrix();
+                // Right Lens Diagonal Stylized Shine (White Strip)
+                glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, glassesWhite);
+                glMaterialfv(GL_FRONT, GL_EMISSION, glassesWhite);
+                glPushMatrix();
+                    glTranslatef(0.0f, 0.0f, 0.022f);
+                    glRotatef(45.0f, 0.0f, 0.0f, 1.0f);
+                    glScalef(0.03f, 0.15f, 0.001f);
+                    glutSolidCube(1.0);
+                glPopMatrix();
+                glMaterialfv(GL_FRONT, GL_EMISSION, clear);
+            glPopMatrix();
+        glPopMatrix();
+
+        // LIMBS
+        glMaterialfv(GL_FRONT, GL_SPECULAR, suitHighlight);
+        glMaterialf(GL_FRONT, GL_SHININESS, 30.0f);
+
+        // Left Arm
+        glPushMatrix();
+            glTranslatef(-0.5f, 0.5f, 0.0f); // Shoulder joint pivot
+            glRotatef(leftArmX, 1.0f, 0.0f, 0.0f); // Forward/Back rotation
+            glRotatef(leftArmZ, 0.0f, 0.0f, 1.0f); // Outward splay rotation
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glPushMatrix();
+                glTranslatef(0.0f, -0.4f, 0.0f);
+                glScalef(0.2f, 0.8f, 0.2f);
+                glutSolidCube(1.0);
+            glPopMatrix();
+        glPopMatrix();
+
+        // Right Arm
+        glPushMatrix();
+            glTranslatef(0.5f, 0.5f, 0.0f); // Shoulder joint pivot
+            glRotatef(rightArmX, 1.0f, 0.0f, 0.0f);  // Forward/Back rotation
+            glRotatef(rightArmZ, 0.0f, 0.0f, 1.0f);  // Outward splay rotation
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, suitColor);
+            glPushMatrix();
+                glTranslatef(0.0f, -0.4f, 0.0f);
+                glScalef(0.2f, 0.8f, 0.2f);
+                glutSolidCube(1.0);
+            glPopMatrix();
+        glPopMatrix();
+
+        // Right Leg
+        glPushMatrix();
+            glTranslatef(0.25f, -0.6f, 0.0f);
+            glRotatef(rightLegX, 1.0f, 0.0f, 0.0f);
+            glRotatef(rightLegZ, 0.0f, 0.0f, 1.0f);
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+            glTranslatef(0.0f, -0.5f, 0.0f);
+            glScalef(0.25f, 1.0f, 0.25f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // Left Leg
+        glPushMatrix();
+            glTranslatef(-0.25f, -0.6f, 0.0f);
+            glRotatef(leftLegX, 1.0f, 0.0f, 0.0f);
+            glRotatef(leftLegZ, 0.0f, 0.0f, 1.0f);
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+            glTranslatef(0.0f, -0.5f, 0.0f);
+            glScalef(0.25f, 1.0f, 0.25f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+    glPopMatrix();
+}
+
+void drawNeonText(const char* text) {
+    glPushMatrix();
+    glLineWidth(4.0f); // Bold glowing lines
+    for (const char* c = text; *c != '\0'; c++) {
+        glutStrokeCharacter(GLUT_STROKE_ROMAN, *c);
+    }
+    glLineWidth(1.0f);
+    glPopMatrix();
+}
+
+void drawFlatCircle(float radius, int segments) {
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < segments; i++) {
+        float theta = 2.0f * PI * float(i) / float(segments);
+        glVertex3f(radius * cosf(theta), 0.0f, radius * sinf(theta));
+    }
+    glEnd();
+}
+
+void drawSideBuilding(float xPos, float zPos, float height) {
+    float groundY = -90.0f;
+    float topY = groundY + height;
+
+    glPushMatrix();
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+        glPushMatrix();
+            float centerY = groundY + (height / 2.0f);
+            glTranslatef(xPos, centerY, zPos);
+            glScalef(20.0f, height, 30.0f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+            glTranslatef(xPos, topY + 0.5f, zPos);
+            glScalef(21.0f, 2.0f, 31.0f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glMaterialfv(GL_FRONT, GL_EMISSION, windowGlow);
+        float faceX = (xPos < 0) ? xPos + 10.1f : xPos - 10.1f;
+        for (float wy = topY - 15.0f; wy > -60.0f; wy -= 10.0f) {
+            for (float wz = zPos - 8.0f; wz <= zPos + 8.0f; wz += 8.0f) {
+                glPushMatrix();
+                    glTranslatef(faceX, wy, wz);
+                    glScalef(0.5f, 3.5f, 3.0f);
+                    glutSolidCube(1.0);
+                glPopMatrix();
+            }
+        }
+        glMaterialfv(GL_FRONT, GL_EMISSION, clear);
+    glPopMatrix();
+}
+
+void drawHelipad(float x, float z) {
+    glPushMatrix();
+        glTranslatef(15.0f, 51.6f, 13.0f);
+        glDisable(GL_LIGHTING);
+
+        glColor3fv(bldgColor);
+        drawFlatCircle(13.0f, 32);
+
+        glTranslatef(0.0f, 0.1f, 0.0f);
+        glColor3f(0.4f, 0.4f, 0.4f);
+        drawFlatCircle(10.0f, 32);
+
+        glTranslatef(0.0f, 0.1f, 0.0f);
+        glColor3f(0.9f, 0.9f, 0.9f);
+        glLineWidth(5.0f);
+        glBegin(GL_LINES);
+            glVertex3f(-4.0f, 0.0f, -5.0f); glVertex3f(-4.0f, 0.0f, 5.0f);
+            glVertex3f(4.0f, 0.0f, -5.0f);  glVertex3f(4.0f, 0.0f, 5.0f);
+            glVertex3f(-4.0f, 0.0f, 0.0f);  glVertex3f(4.0f, 0.0f, 0.0f);
+        glEnd();
+
+        glEnable(GL_LIGHTING);
+    glPopMatrix();
+}
+
+void drawCatwalk(float x, float z) {
+    glPushMatrix();
+        glTranslatef(x, 55.0f, z);
+
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, industrialMetal);
+        glPushMatrix();
+            glScalef(20.0f, 1.0f, 6.0f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        // Poles
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+        for (int i = -1; i <= 1; i += 2) {
+            for (int j = -1; j <= 1; j += 2) {
+                glPushMatrix();
+                    glTranslatef(i * 9.0f, -2.5f, j * 2.5f);
+                    glScalef(1.0f, 4.0f, 1.0f);
+                    glutSolidCube(1.0);
+                glPopMatrix();
+            }
+        }
+
+        // Ladder
+        glPushMatrix();
+            glTranslatef(0.0f, -4.3f, 3.5f);
+            glBegin(GL_LINES);
+                glVertex3f(-1.0f, 0, 0); glVertex3f(-1.0f, 5, 0);
+                glVertex3f(1.0f, 0, 0);  glVertex3f(1.0f, 5, 0);
+                for (int i = 0; i < 6; i++) { glVertex3f(-1.0f, i * 1.0f, 0); glVertex3f(1.0f, i * 1.0f, 0); }
+            glEnd();
+        glPopMatrix();
+    glPopMatrix();
+}
+
+// --- ROOFTOP AC UNIT (WITH DETAILED FAN) ---
+void drawACUnit(float xPos, float zPos, float time) {
+    glPushMatrix();
+        glTranslatef(xPos, 53.0f, zPos);
+
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, doorMetal);
+            glScalef(6.0f, 4.0f, 4.0f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, gearColor);
+            glTranslatef(0.0f, 2.02f, 0.0f);
+            glScalef(3.6f, 0.05f, 2.4f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslatef(-0.5f, 0.4f, -2.01f);
+            glRotatef(-90.0f, 1.0f, 0.0f, 0.0f);
+
+            GLfloat holeColor[] = { 0.02f, 0.02f, 0.02f, 1.0f };
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, holeColor);
+            drawFlatCircle(1.5f, 20);
+
+            GLfloat hubColor[] = { 0.4f, 0.4f, 0.45f, 1.0f };
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, hubColor);
+            glTranslatef(0.0f, 0.01f, 0.0f);
+            drawFlatCircle(0.4f, 12);
+
+            glDisable(GL_LIGHTING);
+            glColor3f(0.5f, 0.5f, 0.55f);
+            glLineWidth(2.0f);
+
+            glPushMatrix();
+                glRotatef(time * 0.2f, 0.0f, 1.0f, 0.0f);
+                glBegin(GL_LINES);
+                    for (int i = 0; i < 8; i++) {
+                        float angle = i * (PI / 4.0f);
+                        glVertex3f(0.0f, 0.02f, 0.0f);
+                        glVertex3f(1.5f * cosf(angle), 0.02f, 1.5f * sinf(angle));
+                    }
+                    for (float r = 0.6f; r <= 1.2f; r += 0.3f) {
+                        for (int i = 0; i < 20; i++) {
+                            float angle1 = i * (2.0f * PI / 20.0f);
+                            float angle2 = (i + 1) * (2.0f * PI / 20.0f);
+                            glVertex3f(r * cosf(angle1), 0.02f, r * sinf(angle1));
+                            glVertex3f(r * cosf(angle2), 0.02f, r * sinf(angle2));
+                        }
+                    }
+                glEnd();
+            glPopMatrix();
+
+            glLineWidth(1.0f);
+            glEnable(GL_LIGHTING);
+
+        glPopMatrix();
+    glPopMatrix();
+}
+
+void drawSky() {
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+        glLoadIdentity();
+        glOrtho(-1, 1, -1, 1, -1, 1);
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+            glLoadIdentity();
+            glColor3f(skyColor[0], skyColor[1], skyColor[2]);
+            glBegin(GL_QUADS);
+                glVertex2f(-1.0f, -1.0f);
+                glVertex2f(1.0f, -1.0f);
+                glVertex2f(1.0f, 1.0f);
+                glVertex2f(-1.0f, 1.0f);
+            glEnd();
+            glMatrixMode(GL_PROJECTION);
+        glPopMatrix();
+        glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+}
+
+void drawRooftopDetails() {
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, industrialMetal);
+
+    // Glowing Skylights
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    GLfloat lightBlue[] = { 0.0f, 0.5f, 1.0f, 0.6f };
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, lightBlue);
+    glMaterialfv(GL_FRONT, GL_EMISSION, lightBlue);
+    for (int i = 0; i < 3; i++) {
+        glPushMatrix(); glTranslatef(-20.0f + i * 20.0f, 50.6f, 40.0f); glScalef(6.0f, 0.1f, 4.0f); glutSolidCube(1.0); glPopMatrix();
+    }
+
+    glDisable(GL_BLEND);
+    glLineWidth(1.0f);
+    glEnable(GL_LIGHTING);
+    glMaterialfv(GL_FRONT, GL_EMISSION, clear);
+}
+
+void drawRooftopDoors() {
+    float swing = 140.0f;
+
+    glPushMatrix();
+        glTranslatef(0.0f, 51.0f, 32.0f);
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+        glPushMatrix();
+            glTranslatef(0.0f, 2.0f, 3.5f);
+            glScalef(6.0f, 4.0f, 7.0f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, doorMetal);
+        glPushMatrix();
+            glTranslatef(-2.0f, 2.0f, 0.0f);
+            glRotatef(swing, 0.0f, 1.0f, 0.0f);
+            glTranslatef(1.0f, 0.0f, 0.0f);
+            glScalef(2.0f, 3.5f, 0.2f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslatef(2.0f, 2.0f, 0.0f);
+            glRotatef(-swing, 0.0f, 1.0f, 0.0f);
+            glTranslatef(-1.0f, 0.0f, 0.0f);
+            glScalef(2.0f, 3.5f, 0.2f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+    glPopMatrix();
+}
+
+// The Helipad Building
+void drawHeliBuilding() {
+    glPushMatrix();
+        // 1. Central Launch Rooftop
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bldgColor);
+            glTranslatef(0.0f, 24.5f, 25.0f);
+            glScalef(60.0f, 51.0f, 50.0f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glPushMatrix();
+            glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, sideRoofCap);
+            glTranslatef(0.0f, 50.5f, 25.0f);
+            glScalef(62.0f, 2.0f, 52.0f);
+            glutSolidCube(1.0);
+        glPopMatrix();
+
+        glMaterialfv(GL_FRONT, GL_EMISSION, windowGlow);
+        float startY = 42.0f;
+        for (int row = 0; row < 6; row++) {
+            float wy = startY - (row * 12.0f);
+            glPushMatrix(); glTranslatef(-14.0f, wy, -0.1f); glScalef(12.0f, 7.0f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+            glPushMatrix(); glTranslatef(14.0f, wy, -0.1f); glScalef(12.0f, 7.0f, 0.5f); glutSolidCube(1.0); glPopMatrix();
+        }
+        glMaterialfv(GL_FRONT, GL_EMISSION, clear);
+
+        drawRooftopDetails();
+
+        // BACKGROUND SKYLINE
+        for (float buildZ = 300.0f; buildZ >= -600.0f; buildZ -= 35.0f) {
+            float leftHeight = 100.0f + (abs((int)buildZ * 3 + 7) % 9) * 10.0f;
+            float rightHeight = 100.0f + (abs((int)buildZ * 5 + 31) % 9) * 10.0f;
+            drawSideBuilding(-67.0f, buildZ, leftHeight);
+            drawSideBuilding(63.0f, buildZ, rightHeight);
+        }
+
+        // Deep background towers
+        for (float dz = -650.0f; dz > -900.0f; dz -= 60.0f) {
+            drawSideBuilding(-120.0f, dz, 250.0f);
+            drawSideBuilding(120.0f, dz, 280.0f);
+        }
+    glPopMatrix();
+}
+
+// Helipad Scene
+void drawHelipadScene(float time) {
+    glPushMatrix();
+        glRotatef(180.0f, 0.0f, 1.0f, 0.0f);
+        glTranslatef(0.0f, 0.0f, -25.0f);
+        drawACUnit(18.0f, 30.0f, time); // Bottom-Right
+        drawACUnit(-18.0f, 20.0f, time);  // Top-Left
+
+        drawHelipad(0.0f, 0.0f);
+
+        glPushMatrix();
+            glTranslatef(-27.0f, 1.0f, 35.0f);
+            glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+            drawCatwalk(0.0f, 0.0f);
+        glPopMatrix();
+
+        drawHeliBuilding();
+
+        drawRooftopDoors();
+    glPopMatrix();
+}
+
+// Helicopter Model
+void drawHelicopter() {
+    // Material Palette
+    GLfloat bodyColor[] = { 0.10f, 0.14f, 0.20f, 1.0f }; // Tactical stealth navy/grey
+    GLfloat rotorColor[] = { 0.05f, 0.05f, 0.05f, 1.0f }; // Matte black blades
+    GLfloat glassColor[] = { 0.30f, 0.60f, 0.90f, 0.6f };  // Semi-translucent cockpit glass
+    GLfloat engineColor[] = { 0.30f, 0.30f, 0.35f, 1.0f }; // Dark metallic steel
+
+    // Rotor spinning based on global timing
+    float rotorAngle = elapsedTime * 2.5f;
+
+    // 1. MAIN BODY
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bodyColor);
+
+    glPushMatrix();
+        glScalef(0.6f, 0.6f, 0.6f); // Adjust Helicopter Size
+        // Floor of the cabin
+        glPushMatrix();
+            glTranslatef(0.0f, -2.0f, 0.0f);
+            glScalef(6.0f, 0.4f, 12.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Roof of the cabin
+        glPushMatrix();
+            glTranslatef(0.0f, 4.0f, 0.0f);
+            glScalef(6.0f, 0.4f, 12.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Cockpit Base (Blocks off the front cabin space)
+        glPushMatrix();
+            glTranslatef(0.0f, 1.0f, 5.0f);
+            glScalef(6.0f, 6.0f, 2.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Rear Wall
+        glPushMatrix();
+            glTranslatef(0.0f, 1.0f, -5.0f);
+            glScalef(6.0f, 6.0f, 2.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Middle Structural Pillars
+        // Front left pillar
+        glPushMatrix();
+            glTranslatef(-2.8f, 1.0f, 3.5f);
+            glScalef(0.4f, 6.0f, 0.8f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+        // Front right pillar
+        glPushMatrix();
+            glTranslatef(2.8f, 1.0f, 3.5f);
+            glScalef(0.4f, 6.0f, 0.8f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+        // Rear left pillar
+        glPushMatrix();
+            glTranslatef(-2.8f, 1.0f, -3.5f);
+            glScalef(0.4f, 6.0f, 0.8f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+        // Rear right pillar
+        glPushMatrix();
+            glTranslatef(2.8f, 1.0f, -3.5f);
+            glScalef(0.4f, 6.0f, 0.8f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // 2. COCKPIT WINDSHIELD
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, glassColor);
+        glPushMatrix();
+            glTranslatef(0.0f, 1.0f, 7.0f);
+            glScalef(5.0f, 4.0f, 2.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // 3. TAIL & REAR ROTOR
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, bodyColor);
+        // Structural Tail Pipe
+        glPushMatrix();
+            glTranslatef(0.0f, 2.5f, -11.0f);
+            glScalef(1.2f, 1.2f, 12.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Vertical Tail Fin
+        glPushMatrix();
+            glTranslatef(0.0f, 5.0f, -16.5f);
+            glScalef(0.4f, 4.0f, 2.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Tail Rotor Blades
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, rotorColor);
+        glPushMatrix();
+            glTranslatef(0.5f, 5.5f, -16.5f);
+            glRotatef(rotorAngle * 1.5f, 1.0f, 0.0f, 0.0f); // Spin around X-axis
+            glScalef(0.1f, 3.0f, 0.4f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // 4. MAIN TOP ROTOR ASSEMBLY
+        // Engine Housing Shaft
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, engineColor);
+        glPushMatrix();
+            glTranslatef(0.0f, 5.0f, 0.0f);
+            glScalef(2.0f, 1.5f, 4.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Main Rotor Mast (Stick connection)
+        glPushMatrix();
+            glTranslatef(0.0f, 6.0f, 0.0f);
+            glScalef(0.4f, 1.5f, 0.4f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Main Rotor Blades (Spinning Cross-Array)
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, rotorColor);
+        glPushMatrix();
+            glTranslatef(0.0f, 6.8f, 0.0f);
+            glRotatef(rotorAngle, 0.0f, 1.0f, 0.0f); // Spin horizontally around Y axis
+            // Blade pair 1
+            glPushMatrix();
+                glScalef(26.0f, 0.1f, 1.0f);
+                glutSolidCube(1.0f);
+            glPopMatrix();
+            // Blade pair 2 (Perpendicular)
+            glPushMatrix();
+                glScalef(1.0f, 0.1f, 26.0f);
+                glutSolidCube(1.0f);
+            glPopMatrix();
+        glPopMatrix();
+
+        // 5. LANDING SKIDS
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, engineColor);
+        // Left Skid Runner
+        glPushMatrix();
+            glTranslatef(-3.0f, -3.5f, 0.0f);
+            glScalef(0.4f, 0.4f, 14.0f); glutSolidCube(1.0f);
+        glPopMatrix();
+        // Right Skid Runner
+        glPushMatrix();
+            glTranslatef(3.0f, -3.5f, 0.0f);
+            glScalef(0.4f, 0.4f, 14.0f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+        // Support Struts (Attaches chassis floor to the runners)
+        glPushMatrix(); glTranslatef(-3.0f, -2.8f, 3.0f); glScalef(0.3f, 1.2f, 0.3f); glutSolidCube(1.0f); glPopMatrix();
+        glPushMatrix(); glTranslatef(-3.0f, -2.8f, -3.0f); glScalef(0.3f, 1.2f, 0.3f); glutSolidCube(1.0f); glPopMatrix();
+        glPushMatrix(); glTranslatef(3.0f, -2.8f, 3.0f); glScalef(0.3f, 1.2f, 0.3f); glutSolidCube(1.0f); glPopMatrix();
+        glPushMatrix(); glTranslatef(3.0f, -2.8f, -3.0f); glScalef(0.3f, 1.2f, 0.3f); glutSolidCube(1.0f); glPopMatrix();
+    glPopMatrix();
+}
+
+// Minigun Model
+void drawMinigun(float spin) {
+    // Spin speed factor for the barrel cluster over time
+    float barrelSpin = spin * 5.0f;
+
+    // 1. MAIN BODY
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, metalDark);
+    glPushMatrix();
+        // Main structural mechanics box: width=0.6, height=0.6, depth=1.6
+        glScalef(0.6f, 0.6f, 1.6f);
+        glutSolidCube(1.0f);
+    glPopMatrix();
+
+    // Ammo Feeder Box Belt attachment (left side offset)
+    glPushMatrix();
+        glTranslatef(-0.35f, -0.1f, -0.2f);
+        glScalef(0.2f, 0.4f, 0.5f);
+        glutSolidCube(1.0f);
+    glPopMatrix();
+
+    // 2. REAR GRIP & HANDLES
+    glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, metalGrey);
+    // Vertical Spade D-Grip bracket
+    glPushMatrix();
+        glTranslatef(0.0f, 0.2f, -0.9f);
+        glScalef(0.1f, 0.5f, 0.1f);
+        glutSolidCube(1.0f);
+    glPopMatrix();
+    // Horizontal handle bar piece
+    glPushMatrix();
+        glTranslatef(0.0f, 0.45f, -0.9f);
+        glScalef(0.4f, 0.1f, 0.1f);
+        glutSolidCube(1.0f);
+    glPopMatrix();
+
+    // 3. ROTATING SIX-BARREL CLUSTER ARRAY
+    // Barrel Rotor Hub Disk
+    glPushMatrix();
+        glTranslatef(0.0f, 0.0f, 0.85f);
+        glScalef(0.5f, 0.5f, 0.2f);
+        glutSolidCube(1.0f);
+    glPopMatrix();
+
+    // Isolated Matrix block to spin ONLY the barrels and alignment rings
+    glPushMatrix();
+        glTranslatef(0.0f, 0.0f, 0.95f);
+        glRotatef(barrelSpin, 0.0f, 0.0f, 1.0f); // Fast spin around the Z-axis
+
+        // Central core tube
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, heatGlow);
+        glPushMatrix();
+            glScalef(0.15f, 0.15f, 2.4f);
+            glTranslatef(0.0f, 0.0f, 0.5f); // Extend out forward
+            glutSolidCube(1.0f);
+        glPopMatrix();
+
+        // Generating 6 individual perimeter barrels using radial trigonometry
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, metalDark);
+        float radius = 0.18f;
+        for (int i = 0; i < 6; i++) {
+            float angle = (i * 60.0f) * (PI / 180.0f);
+            float bX = cosf(angle) * radius;
+            float bY = sinf(angle) * radius;
+
+            glPushMatrix();
+                glTranslatef(bX, bY, 1.2f); // Distance forward
+                glScalef(0.06f, 0.06f, 2.4f); // Long thin tubes
+                glutSolidCube(1.0f);
+            glPopMatrix();
+        }
+
+        // Structural Reinforcement Rings
+        glMaterialfv(GL_FRONT, GL_AMBIENT_AND_DIFFUSE, metalGrey);
+        // Middle ring
+        glPushMatrix();
+            glTranslatef(0.0f, 0.0f, 1.2f);
+            glScalef(0.45f, 0.45f, 0.08f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+        // Muzzle end ring
+        glPushMatrix();
+            glTranslatef(0.0f, 0.0f, 2.3f);
+            glScalef(0.45f, 0.45f, 0.08f);
+            glutSolidCube(1.0f);
+        glPopMatrix();
+    glPopMatrix();
+}
+
+void drawFadeOverlay(float alpha) {
+    // 1. Change projection matrix to 2D Orthographic
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+        glLoadIdentity();
+        gluOrtho2D(0.0, 1.0, 0.0, 1.0); // Create a simple 0 to 1 coordinate flat canvas
+
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+
+            glLoadIdentity();
+            // 2. Disable Depth testing and lighting
+            glDisable(GL_LIGHTING);
+            glDisable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+
+            // 3. Draw a solid black square with transparency value
+            glColor4f(0.0f, 0.0f, 0.0f, alpha);
+            glBegin(GL_QUADS);
+                glVertex2f(0.0f, 0.0f);
+                glVertex2f(1.0f, 0.0f);
+                glVertex2f(1.0f, 1.0f);
+                glVertex2f(0.0f, 1.0f);
+            glEnd();
+
+            // 4. Clean up state changes and restore original 3D perspective settings
+            glEnable(GL_DEPTH_TEST);
+            glEnable(GL_LIGHTING);
+
+        glPopMatrix();
+        glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glMatrixMode(GL_MODELVIEW);
+}
+
+// MASTER DISPLAY
+void display() {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glLoadIdentity();
+
+    // Operative Starting Position
+    float posX = -9.5f, posY = 53.5f, posZ = 10.0f;
+    float pitch = 0.0f, yaw = 90.0f, roll = 0.0f;
+
+    // Camera Variables
+    float camX = 0.0f, camY = 58.0f, camZ = 30.0f;
+    float lookX = 0.0f, lookY = 0.0f, lookZ = 0.0f;
+    float upX = 0.0f, upY = 1.0f, upZ = 0.0f; // Y-axis is up
+
+    // Helicopter Positioning
+    float startHeight = 0.0f;   // Starting altitude
+    float targetHeight = 58.0f;  // Perfect final hovering height
+    float brakeFactor = 0.0015f; // Adjust this to control deceleration speed
+    float heliX = -40.0f, heliY = targetHeight, heliZ = 10.0f; // Position
+    float bobbingOffset = sinf(elapsedTime * 0.002f) * 0.4f; // Adjust 0.002f for speed of bobbing, adjust 0.4f for the height gap
+    float gentleRoll = sinf(elapsedTime * 0.0015f) * 1.5f; // Slight side-to-side rock (1.5 degrees)
+    float gentlePitch = cosf(elapsedTime * 0.0018f) * 1.0f; // Slight nose-up or nose-down dip
+    float heliSway = 0.0f; // Swaying Impact
+    float noseDive = 0.0f; // Rotation when moving
+    
+    drawSky(); // Drawing The Sky
+
+    if (elapsedTime >= 0 && elapsedTime < 2500) { // Scene 1: Helicopter Arrival
+        // 1. Calculation and Camera Setting
+        // Helicopter Animation
+        float heliY = (targetHeight - startHeight) * (1.0f - expf(-brakeFactor * elapsedTime)) + startHeight; // Calculation
+
+        // Camera Position and Target
+        lookX = heliX; lookY = heliY; lookZ = heliZ; // Look at helicopter
+        camX = posX + 10.0f; camY = posY + 5; camZ = posZ; // Slightly behind operative
+
+        // Camera Shake
+        float shakeIntensity = 0.1f; // Adjust shake strength
+        float shakeOffsetX = sinf(elapsedTime * 0.05f) * shakeIntensity;
+        float shakeOffsetY = cosf(elapsedTime * 0.06f) * shakeIntensity;
+        float shakeOffsetZ = sinf(elapsedTime * 0.07f) * shakeIntensity;
+
+        // Apply offsets to both where the camera is and what it's looking at
+        camX += shakeOffsetX;      lookX += shakeOffsetX;
+        camY += shakeOffsetY;      lookY += shakeOffsetY;
+        camZ += shakeOffsetZ;      lookZ += shakeOffsetZ;
+
+        if (freeCamMode) { // Free Cam Mode
+            gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+        }
+        else { // Scripted Camera
+            gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+        }
+
+        // 2. Draw Helicopter
+        glPushMatrix();
+            glTranslatef(heliX, heliY, heliZ);
+            glRotatef(gentleRoll, 0.0f, 0.0f, 1.0f);
+            glRotatef(gentlePitch, 1.0f, 0.0f, 0.0f);
+            drawHelicopter();
+        glPopMatrix();
+
+        // 3. Render and Translate the Characters
+        glPushMatrix();
+            glTranslatef(posX, posY, posZ);
+            drawOperative(pitch, yaw, roll, 2, 35.0f); // Draw Operative with surprised pose
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslatef(heliX, heliY + 0.5f, heliZ - 1.0f);
+            drawGunner(0.0f, 180.0f , 0.0f, 1); // Draw gunner holding minigun
+                // Minigun (dependent of gunner's position)
+                glPushMatrix();
+                    glTranslatef(0.25f, -0.25f, 0.6f);
+                    glRotatef(-7.0f, 0.0f, 0.0f, 1.0f); // Slightly looking down
+                    glRotatef(90.0f, 0.0f, 1.0f, 0.0f); // Rotated to the left
+                    drawMinigun(elapsedTime);
+                glPopMatrix();
+        glPopMatrix();  
+    }
+
+    if (elapsedTime >= 2500 && elapsedTime < 5000 ) { // Scene 2: Gunner Close-Up
+        // 1. Camera Setting
+        // Calculate scene time
+        float sceneTime = elapsedTime - 2500.0f;
+
+        // Normalize time into a 0.0f to 1.0f progress slider over a 1.7-second duration
+        float progress = sceneTime / 1700.0f;
+        if (progress > 1.0f) progress = 1.0f; // Lock it at maximum zoom
+
+        // Apply bobbing for helicopter
+        heliY = heliY + bobbingOffset;
+
+        // Define Start Positions
+        float startCamX = posX + 10.0f;
+        float startCamY = posY + 5;
+        float startCamZ = posZ;
+        float startLookX = heliX;
+        float startLookY = targetHeight;
+        float startLookZ = heliZ;
+
+        // Define Target Close-Up Positions
+        float targetCamX = heliX + 5.0f;   // Position camera 5 units out to the side
+        float targetCamY = targetHeight - 0.5f; // A little lower than gunner eye level
+        float targetCamZ = heliZ + 2.0f;   // Slightly in front of gunner
+
+        float targetLookX = heliX;
+        float targetLookY = targetHeight + 0.5f; // Point camera directly at gunner center
+        float targetLookZ = heliZ - 1.0f;
+
+        // Dynamic Camera Calculation
+        camX = startCamX + (targetCamX - startCamX) * progress;
+        camY = startCamY + (targetCamY - startCamY) * progress;
+        camZ = startCamZ + (targetCamZ - startCamZ) * progress;
+
+        lookX = startLookX + (targetLookX - startLookX) * progress;
+        lookY = startLookY + (targetLookY - startLookY) * progress;
+        lookZ = startLookZ + (targetLookZ - startLookZ) * progress;
+
+        if (freeCamMode) { // Free Cam Mode
+            gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+        }
+        else { // Scripted Camera
+            gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+        }
+              
+
+        // 2. Draw Helicopter
+        glPushMatrix();
+            glTranslatef(heliX, heliY, heliZ);
+            glRotatef(gentleRoll, 0.0f, 0.0f, 1.0f);
+            glRotatef(gentlePitch, 1.0f, 0.0f, 0.0f);
+            drawHelicopter();
+        glPopMatrix();
+
+        // 3. Render and Translate the Characters
+        glPushMatrix();
+            glTranslatef(posX, posY, posZ);
+            drawOperative(pitch, yaw, roll, 2, 35.0f); // Draw Operative with surprised pose
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslatef(heliX, heliY + 0.5f, heliZ - 1.0f);
+            drawGunner(0.0f, 180.0f, 0.0f, 1); // Draw gunner holding minigun
+                // Minigun (dependent of gunner's position)
+                glPushMatrix();
+                    glTranslatef(0.25f, -0.25f, 0.6f);
+                    glRotatef(-7.0f, 0.0f, 0.0f, 1.0f); // Slightly looking down
+                    glRotatef(90.0f, 0.0f, 1.0f, 0.0f); // Rotated to the left
+                    drawMinigun(elapsedTime);
+                glPopMatrix();
+        glPopMatrix();
+    }
+
+    if (elapsedTime >= 5000 && elapsedTime < 8000) { // Scene 3: Gunner Shooting
+        // 1. Timing and Camera Setting
+        // Calculate scene time
+        float sceneTime = elapsedTime - 5000.0f;
+
+        // Camera Position and Target
+        lookX = heliX; lookY = targetHeight + 1.5f; lookZ = heliZ - 1.0f; // Look at gunner face
+        camX = heliX + 1.0f; camY = targetHeight + 1.0f; camZ = heliZ + 0.5f;
+
+        // Timed Lighting and Shake
+        if (sceneTime < 2300.0f) {
+            bool lightIsOn = ((int)(elapsedTime * 0.04f) % 2) == 0; // Calculate when light is on
+
+            if (lightIsOn) {
+                // Push a temporary bright amber/orange point light right in front of the gun barrel
+                GLfloat flashColor[] = { 1.0f, 0.6f, 0.1f, 1.0f }; // Muzzle flash orange
+                GLfloat flashPos[] = { heliX + 8.0f, targetHeight, heliZ, 1.0f };
+
+                glEnable(GL_LIGHT1); // Ensure GL_LIGHT1 is enabled
+                glLightfv(GL_LIGHT1, GL_DIFFUSE, flashColor);
+                glLightfv(GL_LIGHT1, GL_POSITION, flashPos);
+            }
+            else {
+                glDisable(GL_LIGHT1); // Kill the light instantly on alternating frames
+            }
+            // Camera Shake
+            float shakeIntensity = 0.01f; // Adjust shake strength
+            float shakeOffsetX = sinf(elapsedTime * 0.05f) * shakeIntensity;
+            float shakeOffsetY = cosf(elapsedTime * 0.06f) * shakeIntensity;
+            float shakeOffsetZ = sinf(elapsedTime * 0.07f) * shakeIntensity;
+
+            // Apply offsets to both where the camera is and what it's looking at
+            camX += shakeOffsetX;      lookX += shakeOffsetX;
+            camY += shakeOffsetY;      lookY += shakeOffsetY;
+            camZ += shakeOffsetZ;      lookZ += shakeOffsetZ;
+
+            if (freeCamMode) { // Free Cam Mode
+                gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+            }
+            else { // Scripted Camera
+                gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+            }
+        }
+
+        else {
+            glDisable(GL_LIGHT1); // Stop firing
+            if (freeCamMode) { // Free Cam Mode
+                gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+            }
+            else { // Scripted Camera
+                gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+            }
+        }
+
+        // 2. Draw Helicopter
+        glPushMatrix();
+            glTranslatef(heliX, heliY, heliZ);
+            drawHelicopter();
+        glPopMatrix();
+
+        // 3. Render and Translate the Characters
+        glPushMatrix();
+            glTranslatef(heliX, heliY + 0.5f, heliZ - 1.0f);
+            drawGunner(0.0f, 180.0f, 0.0f, 1); // Draw gunner holding minigun
+                // Minigun (dependent of gunner's position)
+                glPushMatrix();
+                    glTranslatef(0.25f, -0.25f, 0.6f);
+                    glRotatef(-7.0f, 0.0f, 0.0f, 1.0f); // Slightly looking down
+                    glRotatef(90.0f, 0.0f, 1.0f, 0.0f); // Rotated to the left
+                    drawMinigun(elapsedTime);
+                glPopMatrix();
+        glPopMatrix();        
+    }
+
+    if (elapsedTime >= 8000 && elapsedTime < 11000) { // Scene 4: Swing to Operative POV
+        // 1. Animation and Camera Setting
+        // Calculate scene time
+        float sceneTime = elapsedTime - 8000.0f;
+
+        // Normalize time into a 0.0f to 1.0f progress slider over a 2.3-second duration
+        float progress = sceneTime / 2300.0f;
+        if (progress > 1.0f) progress = 1.0f; // Max
+
+        // Apply bobbing for helicopter
+        heliY = heliY + bobbingOffset;
+
+        // Define Start Positions
+        float startCamX = heliX;
+        float startCamY = targetHeight;
+        float startCamZ = heliZ;
+        float startLookX = heliX;
+        float startLookY = targetHeight;
+        float startLookZ = heliZ;
+
+        // Define Target Close-Up Positions
+        float targetCamX = posX - 3.0f;   // Operative POV
+        float targetCamY = posY;
+        float targetCamZ = posZ;   
+
+        float targetLookX = heliX;
+        float targetLookY = targetHeight + 0.5f; // Point camera directly at gunner center
+        float targetLookZ = heliZ - 1.0f;
+
+        // Dynamic Camera Calculation
+        camX = startCamX + (targetCamX - startCamX) * progress;
+        camY = startCamY + (targetCamY - startCamY) * progress;
+        camZ = startCamZ + (targetCamZ - startCamZ) * progress;
+
+        lookX = startLookX + (targetLookX - startLookX) * progress;
+        lookY = startLookY + (targetLookY - startLookY) * progress;
+        lookZ = startLookZ + (targetLookZ - startLookZ) * progress;
+
+        if (freeCamMode) { // Free Cam Mode
+            gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+        }
+        else { // Scripted Camera
+            gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+        }
+
+        // 2. Draw Helicopter
+        glPushMatrix();
+            glTranslatef(heliX, heliY, heliZ);
+            glRotatef(gentleRoll, 0.0f, 0.0f, 1.0f);
+            glRotatef(gentlePitch, 1.0f, 0.0f, 0.0f);
+            drawHelicopter();
+        glPopMatrix();
+
+        // 3. Render and Translate the Characters
+        glPushMatrix();
+            glTranslatef(heliX, heliY + 0.5f, heliZ - 1.0f);
+            glRotatef(45.0f, 1.0f, 0.0f, 0.0f); // Bending forward
+            drawGunner(0.0f, 180.0f, 0.0f, 3); // Draw gunner putting down minigun
+        glPopMatrix();
+
+        //Minigun
+        glPushMatrix();
+            glTranslatef(heliX - 1.0f, heliY - 0.8f, heliZ - 1.0f);
+            drawMinigun(0); // Dont spin barrel
+        glPopMatrix();
+
+        // 4. Draw Text
+        glPushMatrix();
+            glTranslatef(posX - 8.5f, posY + 2.5f, posZ + 1.7f); // Follow camera
+            glRotatef(90.0f, 0.0f, 1.0f, 0.0f);
+            glScalef(0.003f, 0.003f, 0.003f);
+
+            glDisable(GL_LIGHTING);
+            glColor3f(1.0f, 0.1f, 0.1f); // Warning Red
+
+            drawNeonText("COME ON, JUMP!");
+
+            glEnable(GL_LIGHTING);
+        glPopMatrix();
+    }
+
+    if (elapsedTime >= 11000 && elapsedTime < 14000) { // Scene 5: Run and Jump
+       // 1. Animation and Camera Setting
+       // Calculate scene time
+       float sceneTime = elapsedTime - 11000.0f;
+
+       // Normalize time into a 0.0f to 1.0f progress slider over a 3-second duration
+       float progress = sceneTime / 3000.0f;
+       if (progress > 1.0f) progress = 1.0f; // Max
+
+       // Define Start Positions
+       float startCamX = posX;
+       float startCamY = posY;
+       float startCamZ = posZ + 10.0f;
+       float startLookX = posX - 3.0f;
+       float startLookY = posY;
+       float startLookZ = posZ;
+
+       // Define Target Close-Up Positions
+       float targetCamX = heliX + 5.0f; 
+       float targetCamY = targetHeight - 3.0f; // Lower the camera
+       float targetCamZ = heliZ + 15.0f;
+
+       float targetLookX = heliX + 6.0f;
+       float targetLookY = targetHeight; // Point camera up
+       float targetLookZ = heliZ;
+
+       // Dynamic Camera Calculation
+       camX = startCamX + (targetCamX - startCamX) * progress;
+       camY = startCamY + (targetCamY - startCamY) * progress;
+       camZ = startCamZ + (targetCamZ - startCamZ) * progress;
+
+       lookX = startLookX + (targetLookX - startLookX) * progress;
+       lookY = startLookY + (targetLookY - startLookY) * progress;
+       lookZ = startLookZ + (targetLookZ - startLookZ) * progress;
+
+       if (freeCamMode) { // Free Cam Mode
+           gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+       }
+       else { // Scripted Camera
+           gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+       }
+
+       // Move Operative in the X-axis
+       float runX = posX - (sceneTime * 0.009f);
+       float jumpY = posY;
+       float poseAngle = sinf(elapsedTime * 0.01f) * 45.0f; // Rapid arm and leg swing animation
+
+       // Draw operative depending on timing
+       if (sceneTime < 2000.0f) {
+           glPushMatrix();
+               glTranslatef(runX, jumpY, posZ + 0.5f);
+               drawOperative(pitch, yaw, roll, 1, poseAngle); // Draw Operative running
+           glPopMatrix();
+       }
+
+       else {
+           float jumpTime = (sceneTime - 2000.0f) * 0.001f; // Convert to seconds for realistic gravity tracking
+           jumpY = posY + (9.0f * jumpTime) - (9.81f * 0.6f * jumpTime * jumpTime); // Parabolic Jump Curve Math
+           glPushMatrix();
+               glTranslatef(runX, jumpY, posZ + 0.5f);
+               drawOperative(pitch, yaw, roll, 3, 0.0f); // Draw Operative jumping
+           glPopMatrix();
+       }
+
+       // Apply bobbing for helicopter
+       heliY = heliY + bobbingOffset;
+
+       // 2. Draw Helicopter
+       glPushMatrix();
+           glTranslatef(heliX, heliY, heliZ);
+           glRotatef(gentleRoll, 0.0f, 0.0f, 1.0f);
+           glRotatef(gentlePitch, 1.0f, 0.0f, 0.0f);
+           drawHelicopter();
+       glPopMatrix();
+
+       // 3. Render and Translate the Characters
+       glPushMatrix();
+           glTranslatef(heliX + 2.7f, heliY, heliZ + 1.5f);
+           glRotatef(-12.0f, 0.0f, 0.0f, 1.0f);
+           glRotatef(-23.0f, 1.0f, 0.0f, 0.0f);
+           glRotatef(23.0f, 0.0f, 1.0f, 0.0f);
+           drawGunner(0.0f, 180.0f, 0.0f, 2); // Draw gunner strecthing out arm
+       glPopMatrix();
+    }
+
+    if (elapsedTime >= 14000 && elapsedTime < 18000) { // Scene 6: The Getaway
+        // 1. Animation and Camera Setting
+        // Calculate scene time
+        float sceneTime = elapsedTime - 14000.0f;
+
+        // Helicopter Animation
+        float t = sceneTime / 1000.0f; // Animation done in 1 second
+        heliSway = -30.0f * expf(-4.0f * t) * sinf(t * 3.14159f * 2.0f); // Adding impact sway
+
+        if (sceneTime >= 800) { // Starts after 0.8 second
+            float t = (sceneTime - 800.0f) / 500.0f; // Animation done in 0.5 second
+            if (t > 1.0f) t = 1.0f; // Max
+            noseDive = 20.0f * t; // Add nose dive
+
+            heliZ = (sceneTime - 800.0f) * 0.03f + heliZ; // Helicopter moves forward
+            heliY = (sceneTime - 800.0f) * 0.01f + heliY; // Helicopter moves up
+        }
+
+        // Apply bobbing for helicopter
+        heliY = heliY + bobbingOffset;
+
+        // Normalize time into a 0.0f to 1.0f progress slider over a 3.2-second duration
+        float progress;
+        if (sceneTime < 800) progress = 0.0f;
+        else progress = (sceneTime - 800) / 3200.0f; // Progress starts after 0.8 second
+
+        if (progress > 1.0f) progress = 1.0f; // Max
+
+        // Define Start Positions
+        float startCamX = heliX + 5.0f;
+        float startCamY = targetHeight - 3.0f;
+        float startCamZ = heliZ + 15.0f;
+        float startLookX = heliX + 6.0f;
+        float startLookY = targetHeight;
+        float startLookZ = heliZ;
+
+        // Define Target Close-Up Positions
+        float targetCamX = 0.0f;
+        float targetCamY = targetHeight + 8.0f;
+        float targetCamZ = heliZ - 10.0f;
+
+        float targetLookX = heliX;
+        float targetLookY = heliY;
+        float targetLookZ = heliZ;
+
+        // Dynamic Camera Calculation
+        camX = startCamX + (targetCamX - startCamX) * progress;
+        camY = startCamY + (targetCamY - startCamY) * progress;
+        camZ = startCamZ + (targetCamZ - startCamZ) * progress;
+
+        lookX = startLookX + (targetLookX - startLookX) * progress;
+        lookY = startLookY + (targetLookY - startLookY) * progress;
+        lookZ = startLookZ + (targetLookZ - startLookZ) * progress;
+
+        if (freeCamMode) { // Free Cam Mode
+            gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+        }
+        else { // Scripted Camera
+            gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+        }
+
+        // 2. Draw Helicopter
+        glPushMatrix();
+            glTranslatef(heliX + (heliSway * 0.2f), heliY, heliZ);
+            glRotatef(gentleRoll + heliSway, 0.0f, 0.0f, 1.0f);
+            glRotatef(gentlePitch + noseDive, 1.0f, 0.0f, 0.0f);
+            drawHelicopter();
+
+            // 3. Render and Translate the Characters
+            glPushMatrix();
+                glTranslatef(2.7f, 0.0f, 1.5f);
+                glPushMatrix();
+                    glTranslatef(1.1f, -1.5f, -1.0f);
+                    drawOperative(pitch, yaw, roll, 3, 0.0f); // Draw Operative
+                glPopMatrix();
+
+                glRotatef(-12.0f, 0.0f, 0.0f, 1.0f);
+                glRotatef(-23.0f, 1.0f, 0.0f, 0.0f);
+                glRotatef(23.0f, 0.0f, 1.0f, 0.0f);
+                drawGunner(0.0f, 180.0f, 0.0f, 2); // Draw gunner strecthing out arm
+            glPopMatrix();
+        glPopMatrix();
+
+        // 4. Black Screen Fade-Out Sequence
+        if (sceneTime > 3500) {
+            float t = (sceneTime - 3500) / 500.0f; // Within 0.5 second
+            if (t > 1.0f) t = 1.0f; // Max
+            globalFadeAlpha = t;
+            drawFadeOverlay(globalFadeAlpha);
+        }
+    }
+
+    if (elapsedTime >= 18000) { // Scene 7: The End
+        // 1. Animation and Camera Setting
+        // Calculate scene time
+        float sceneTime = elapsedTime - 18000.0f;
+
+        // Camera Position and Target
+        heliY = heliY + 1000.0f;
+        lookX = heliX + 2.0f; lookY = heliY; lookZ = heliZ - 2.0f;
+        camX = heliX + 16.0f; camY = heliY + 1.0f; camZ = heliZ + 10.0f; 
+
+        if (freeCamMode) { // Free Cam Mode
+            gluLookAt(freeCamX, freeCamY, freeCamZ, freeLookX, freeLookY, freeLookZ, 0.0f, 1.0f, 0.0f);
+        }
+        else { // Scripted Camera
+            gluLookAt(camX, camY, camZ, lookX, lookY, lookZ, upX, upY, upZ);
+        }
+
+        // 2. Draw Helicopter
+        glPushMatrix();
+            glTranslatef(heliX, heliY, heliZ);
+            glRotatef(gentleRoll, 0.0f, 0.0f, 1.0f);
+            glRotatef(gentlePitch + 10.0f, 1.0f, 0.0f, 0.0f);
+            drawHelicopter();
+
+            // 3. Render and Translate the Characters
+            glPushMatrix();
+                glTranslatef(0.5f, 0.5f, -1.5f);
+                glRotatef(135.0f, 0.0f, 1.0f, 0.0f);
+                drawOperative(pitch, yaw, roll, 1, 0.0f); // Draw Operative standing
+            glPopMatrix();
+
+            glPushMatrix();
+                glTranslatef(0.5f, 0.5f, 1.0f);
+                drawGunner(0.0f, 180.0f, 0.0f, 1);
+            glPopMatrix();
+        glPopMatrix();
+
+        // 4. Draw Text
+        glPushMatrix();
+            glTranslatef(heliX + 3.5f, heliY + 1.5f, heliZ - 5.5f);
+            glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+            glScalef(0.008f, 0.008f, 0.008f);
+
+            glDisable(GL_LIGHTING);
+            glColor3f(0.2f, 0.2f, 1.0f); // Blue
+
+            drawNeonText("MISSION");
+            glEnable(GL_LIGHTING);
+        glPopMatrix();
+
+        glPushMatrix();
+            glTranslatef(heliX + 3.0f, heliY - 2.5f, heliZ - 5.0f);
+            glRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+            glScalef(0.008f, 0.008f, 0.008f);
+
+            glDisable(GL_LIGHTING);
+            glColor3f(0.2f, 0.2f, 1.0f); // Blue
+
+            drawNeonText("SUCCESSFUL");
+            glEnable(GL_LIGHTING);
+        glPopMatrix();
+
+        // 5. Black Screen Fade-In Sequence
+        float t = sceneTime / 1000.0f; // Within 1 second
+        if (t > 1.0f) t = 1.0f; // Max
+        globalFadeAlpha = 1.0f - t;
+        drawFadeOverlay(globalFadeAlpha);
+
+    }
+
+    drawHelipadScene(elapsedTime); // Draw Scene
+
+    glFlush();
+    glutSwapBuffers();
+}
+
+void reshape(int w, int h) {
+    int target_w = w;
+    int target_h = (w * 3) / 4;
+    if (target_h > h) { target_h = h; target_w = (h * 4) / 3; }
+    glViewport((w - target_w) / 2, (h - target_h) / 2, target_w, target_h);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(50.0, 4.0 / 3.0, 0.1, 1000.0);
+    glMatrixMode(GL_MODELVIEW);
+}
+
+void keyboard(unsigned char key, int x, int y) {
+    float camSpeed = 2.0f; // Speed of camera movement
+
+    switch (key) {
+    case '0':
+        startTime = GetTickCount64(); // Restart Animation
+        break;
+
+    case '1':
+        startTime = GetTickCount64() - 2500.0f; // Skip to scene 2
+        break;
+
+    case '2':
+        startTime = GetTickCount64() - 5000.0f; // Skip to scene 3
+        break;
+
+    case '3':
+        startTime = GetTickCount64() - 8000.0f; // Skip to scene 4
+        break;
+
+    case '4':
+        startTime = GetTickCount64() - 11000.0f; // Skip to scene 5
+        break;
+
+    case '5':
+        startTime = GetTickCount64() - 14000.0f; // Skip to scene 6
+        break;
+
+    case '6':
+        startTime = GetTickCount64() - 18000.0f; // Skip to scene 7
+        break;
+
+    case 'f': // Toggle between automatic scene paths and manual controls
+    case 'F':
+        freeCamMode = !freeCamMode;
+        break;
+
+    // Camera movement triggers (Only active when Free Cam is enabled)
+    case 'w': // Move Camera Forward
+    case 'W':
+        if (freeCamMode) freeCamZ -= camSpeed;
+        break;
+    case 's': // Move Camera Backward
+    case 'S':
+        if (freeCamMode) freeCamZ += camSpeed;
+        break;
+    case 'a': // Strafe Camera Left
+    case 'A':
+        if (freeCamMode) freeCamX -= camSpeed;
+        break;
+    case 'd': // Strafe Camera Right
+    case 'D':
+        if (freeCamMode) freeCamX += camSpeed;
+        break;
+    case 'q': // Pan Camera Up
+    case 'Q':
+        if (freeCamMode) freeCamY += camSpeed;
+        break;
+    case 'e': // Pan Camera Down
+    case 'E':
+        if (freeCamMode) freeCamY -= camSpeed;
+        break;
+
+    case 27: // Escape key
+        exit(0);
+        break;
+    }
+    glutPostRedisplay();
+}
+
+void idle() {
+    ULONGLONG start = GetTickCount64();
+    while (GetTickCount64() - start < 1000 / FPS);
+
+    elapsedTime = (float)(GetTickCount64() - startTime); 
+
+    glutPostRedisplay();
+}
+
+void initGL() {
+    startTime = GetTickCount64();
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    GLfloat lightPos[] = { 1.0f, 1.0f, 1.0f, 0.0f };
+    glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
+    GLfloat lightDiffuse[] = { 0.35f, 0.35f, 0.38f, 1.0f };
+    GLfloat lightAmbient[] = { 0.05f, 0.05f, 0.08f, 1.0f };
+    GLfloat lightSpecular[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, lightDiffuse);
+    glLightfv(GL_LIGHT0, GL_AMBIENT, lightAmbient);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, lightSpecular);
+    glEnable(GL_NORMALIZE);
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+int main(int argc, char** argv) {
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_DEPTH | GLUT_RGB);
+    glutInit(&argc, argv);
+    glutInitWindowSize(SCREENWIDTH, SCREENHEIGHT);
+    glutCreateWindow("Act 3: The Extraction");
+    glutReshapeFunc(reshape);
+    glutDisplayFunc(display);
+    glutIdleFunc(idle);
+    glutKeyboardFunc(keyboard);
+    initGL();
+    glutMainLoop();
+    return 0;
+}
